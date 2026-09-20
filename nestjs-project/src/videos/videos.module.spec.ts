@@ -2,24 +2,25 @@ import { Test } from '@nestjs/testing';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { VerificationToken } from '../auth/entities/verification-token.entity';
-import { User } from '../users/entities/user.entity';
+import { Channel } from '../channels/entities/channel.entity';
 import { createTestDataSource } from '../test/create-test-data-source';
-import { Channel } from './entities/channel.entity';
-import { ChannelsModule } from './channels.module';
-import { Video } from '../videos/entities/video.entity';
+import { User } from '../users/entities/user.entity';
+import { Video } from './entities/video.entity';
+import { VideosModule } from './videos.module';
+import { VideosRepository } from './videos.repository';
 
 const ALL_ENTITIES = [User, Channel, RefreshToken, VerificationToken, Video];
 
-describe('ChannelsModule', () => {
-  it('should compile with TypeOrmModule.forFeature([Channel]) and ChannelsService', async () => {
+describe('VideosModule', () => {
+  it('should compile and expose VideosRepository', async () => {
     const module = await Test.createTestingModule({
       imports: [
         TypeOrmModule.forRoot(createTestDataSource(ALL_ENTITIES).options),
-        ChannelsModule,
+        VideosModule,
       ],
     }).compile();
 
-    expect(module).toBeDefined();
+    expect(module.get(VideosRepository)).toBeInstanceOf(VideosRepository);
     await module.close();
   }, 30000);
 });

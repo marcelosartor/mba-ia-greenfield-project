@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 4/19 completed
+**SIs:** 5/19 completed
 
 ### SI-03.1 — Configurar dependências, namespaces de config e variáveis de ambiente de storage e fila
 - **Status:** completed
@@ -51,9 +51,17 @@
   - Ainda não existe worker consumindo `video-processing`; os jobs publicados ficam em `waiting` até o SI-03.11 (os testes limpam as filas com `obliterate` antes e depois).
 
 ### SI-03.5 — Criar migration, entidade Video e repositório
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 22 passing nos arquivos do SI (video.entity.integration-spec 6, videos.repository.integration-spec 10, public-id.util.spec 3, videos.module.spec 1, migrations.integration-spec 2 [atualizado]); suíte completa 198 passing (34 suítes) e e2e 52 passing; `npx tsc --noEmit` exit 0; `npm run lint` 0 erros (23 warnings preexistentes nos specs de auth); prettier sem problemas
+- **Observations:**
+  - Migration `1789938672313-CreateVideos.ts` gerada pela CLI do TypeORM (`migration:generate`) a partir da entidade e apenas formatada com prettier; aplicada com `migration:run`. `down` remove FK, índices e tabela sem resíduo (coberto pelo spec de migrations).
+  - O CHECK de `status` e os nomes `UQ_videos_public_id`, `IDX_videos_channel_id` e `IDX_videos_status_created_at` são declarados na entidade (`@Check`, `@Unique`, `@Index`), então a CLI os gerou sem SQL manual.
+  - `duration_seconds` (numeric) e `bit_rate`/`size_bytes` (bigint) voltam do PostgreSQL como string; a entidade converte para `number` com um transformer (tamanhos de até 10 GiB cabem com folga em `Number`).
+  - `createDraft` gera o `id` com `randomUUID()` antes do insert para montar `video_key` (`<channel_id>/<video_id>/source.<ext>`) e repete até 5 vezes só quando a violação é de `UQ_videos_public_id`; qualquer outro erro sobe. Não pode rodar dentro de uma transação do chamador (uma violação aborta a transação no PostgreSQL); o SI-03.6 deve chamá-lo fora de transação.
+  - `transitionStatus` aceita um status ou uma lista de status esperados e devolve `boolean`; transição inválida é `false`, nunca erro.
+  - Entidade `Video` incluída em todos os arrays de entidades dos testes (10 specs) e `cleanAllTables` apaga `videos` primeiro; `Channel` ganhou o lado inverso `videos` (`@OneToMany`).
+  - O spec de migrations tinha um deadlock latente: os `DROP TABLE … CASCADE` rodavam em paralelo (`Promise.all`) sobre tabelas ligadas por FK e, com a tabela `videos`, o deadlock passou a aparecer e deixava o banco de testes meio destruído. Os drops agora são sequenciais (3 execuções seguidas estáveis).
+  - Ao listar os arrays de entidades, um `grep -v` meu escondeu dois specs de auth (refresh-token e verification-token); a suíte completa acusou a falha e foram corrigidos na mesma rodada.
 
 ### SI-03.6 — Endpoint POST /videos
 - **Status:** pending
