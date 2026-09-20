@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 3/19 completed
+**SIs:** 4/19 completed
 
 ### SI-03.1 — Configurar dependências, namespaces de config e variáveis de ambiente de storage e fila
 - **Status:** completed
@@ -40,9 +40,15 @@
   - `ListPartsCommand`, `CompleteMultipartUploadCommand` e `AbortMultipartUploadCommand`, que o context7 não tinha devolvido, foram validados pelos tipos do SDK (`tsc`) e pelo teste de integração contra o MinIO real.
 
 ### SI-03.4 — Implementar QueueModule com as filas BullMQ
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 6 passing (video-processing.publisher.integration-spec 5, contra o Redis real do Compose; queue.module.spec 1); `npx tsc --noEmit` exit 0; eslint e prettier de `src/queue` sem problemas
+- **Observations:**
+  - Uma falha na primeira rodada (1 de 3 tentativas de correção usada): o `bullmq@6` trata o `ioredis` como dependência de peer **opcional** (`>=5.0.0`, `peerDependenciesMeta.optional`) e carrega-o só sob demanda; ele não vem junto. Antes eu havia assumido que vinha. Instalei `ioredis@^5.11.1` (linha 5.x, a padrão do BullMQ; a `6.0.0` acabou de sair e não foi usada). A doc do BullMQ (context7) confirma o carregamento sob demanda.
+  - Consequência para a documentação: o `library-refs.md` e o TD-01 não citam o `ioredis`, e ele agora é dependência direta do projeto. Não alterei esses arquivos, pois isso invalidaria a cadeia de artefatos do pipeline; a correção deve entrar nos `CLAUDE.md` no SI-03.19.
+  - Retenção de jobs escolhida pelo plano: `removeOnComplete` de 24 h ou 1000 jobs e `removeOnFail` de 7 dias. Enquanto o job existe, publicar de novo o mesmo `videoId` não cria outro; depois de removido, uma republicação cria um job novo, que o processor do SI-03.12 trata como no-op para vídeo já `ready`.
+  - Os nomes de fila e de job ficam em `queue.constants.ts` (`video-processing`, `video-processing-dlq`, `video-maintenance`; jobs `process-video`, `dead-lettered-video`, `sweep-abandoned-uploads`).
+  - O `queue.module.spec.ts` sobrescreve os três providers de fila, para a verificação de DI não abrir conexão com o Redis (unit sem I/O externo); as conexões reais são exercitadas só no teste de integração.
+  - Ainda não existe worker consumindo `video-processing`; os jobs publicados ficam em `waiting` até o SI-03.11 (os testes limpam as filas com `obliterate` antes e depois).
 
 ### SI-03.5 — Criar migration, entidade Video e repositório
 - **Status:** pending
