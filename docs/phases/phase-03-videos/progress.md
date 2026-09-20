@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 12/19 completed
+**SIs:** 13/19 completed
 
 ### SI-03.1 — Configurar dependências, namespaces de config e variáveis de ambiente de storage e fila
 - **Status:** completed
@@ -159,9 +159,17 @@
   - Pendência que este SI não resolve, para o SI-03.13: um job que falha definitivamente permanece no Redis por 7 dias (`removeOnFail`) com o mesmo `jobId` do vídeo, então uma nova publicação do mesmo `videoId` pelo sweeper seria descartada como duplicada enquanto esse job existir; o sweeper precisa remover o job antigo antes de republicar.
 
 ### SI-03.13 — Implementar o sweeper de uploads abandonados e a republicação de jobs
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 21 passing novos (uploads-sweeper.service.integration-spec 11, uploads-sweeper.scheduler.integration-spec 2, video-processing.publisher.integration-spec +4 de `republish`, videos.repository.integration-spec +4 das consultas do sweeper) + `worker.module.spec` ajustado; suíte completa 363 passing (48 suítes), e2e 77 passing; `npx tsc --noEmit` exit 0; `npm run lint` 0 erros (23 warnings preexistentes); prettier sem problemas nos arquivos do SI. Contra a stack no ar: o `video-worker` do Compose registrou o agendador `abandoned-uploads-sweep` (`every 900000`) no Redis e já executou o sweep
+- **Observations:**
+  - Os quatro critérios do plano passam: rascunho abandonado há 25 h é removido e o multipart deixa de existir (`NoSuchUpload`); rascunho de 1 h fica intacto; vídeo `draft` concluído há 10 min ganha job com `jobId = id` e duas execuções deixam um único job; o agendador existe em `video-maintenance` depois da inicialização (e reiniciar o worker mantém um só agendador, pois é `upsert`).
+  - **Resolve a pendência do SI-03.12:** um job que falhou ou completou continua no Redis com o mesmo `jobId`, então publicar de novo seria descartado como duplicado. Criei `VideoProcessingPublisher.republish(videoId)`: job em espera, atrasado ou rodando é deixado como está; job `failed` ou `completed` é removido e o vídeo é publicado de novo (testado com um worker descartável que deixa o job em cada estado). O sweeper usa `republish`, não `publish`.
+  - O sweeper roda em segundo plano, então cada vídeo é tratado dentro de um try/catch que registra o erro e segue para o próximo; a linha só é apagada depois de abortar o multipart, portanto uma falha do storage deixa o rascunho para a próxima execução (testado). `NoSuchUpload` no abort conta como sucesso (o multipart já não existe ou foi concluído no meio do caminho).
+  - A remoção do rascunho é condicional (`deleteAbandonedDraft`: `WHERE id AND status = 'draft' AND upload_completed_at IS NULL`), para que uma conclusão que corra com o sweeper na fronteira das 24 h nunca perca o vídeo.
+  - Escolhas minhas dentro dos números do plano: lote de 200 vídeos por categoria em cada execução (o restante fica para a próxima, sem varrer a tabela inteira), ordem do mais antigo ao mais novo; limites em `uploads-sweeper.constants.ts` (24 h, 5 min, 15 min) e id do agendador em `queue.constants.ts`.
+  - O agendador é uma classe própria (`UploadsSweeperScheduler`, `OnApplicationBootstrap`) e o `UploadsSweeperProcessor` só delega ao `UploadsSweeperService`, que é quem tem a lógica e o teste.
+  - Os testes do sweeper compilam o `WorkerModule` sem iniciar os consumidores (`VideoProcessor` e `UploadsSweeperProcessor` sobrescritos por `{}` e sem `init()`), para que os jobs publicados fiquem na fila e possam ser contados. Nos demais testes com o `WorkerModule` completo, o agendador também é registrado, no prefixo de teste, sem efeito sobre eles (vídeos de teste são recentes).
+  - Limitação conhecida, prevista no TD-03 mas fora do plano: o sweeper parte das linhas do banco. Multiparts abertos no storage que não têm linha (por exemplo, se a criação do rascunho falhar depois de abrir o multipart e a compensação também falhar) não são encontrados; seria preciso listar os multiparts do próprio storage.
 
 ### SI-03.14 — Endpoint GET /videos/{public_id}
 - **Status:** pending

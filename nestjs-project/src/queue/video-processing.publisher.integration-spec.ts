@@ -1,9 +1,10 @@
 import { getQueueToken } from '@nestjs/bullmq';
 import { ConfigModule, type ConfigType } from '@nestjs/config';
 import { Test, type TestingModule } from '@nestjs/testing';
-import type { JobType, Queue } from 'bullmq';
+import { Worker, type JobType, type Queue } from 'bullmq';
 import { randomUUID } from 'node:crypto';
 import redisConfig from '../config/redis.config';
+import { waitFor } from '../test/wait-for';
 import { QUEUE_NAMES } from './queue.constants';
 import { QueueModule } from './queue.module';
 import { VideoProcessingPublisher } from './video-processing.publisher';
@@ -111,5 +112,76 @@ describe('VideoProcessingPublisher (integration)', () => {
     expect(redis.host).toBe('redis');
     expect(connection.host).toBe(redis.host);
     expect(connection.port).toBe(redis.port);
+  });
+
+  describe('republish', () => {
+    // A throwaway worker with a fixed outcome, to leave jobs failed/completed
+    const finishJob = async (
+      videoId: string,
+      outcome: 'completed' | 'failed',
+    ): Promise<void> => {
+      const redis = module.get<ConfigType<typeof redisConfig>>(redisConfig.KEY);
+      const worker = new Worker(
+        QUEUE_NAMES.VIDEO_PROCESSING,
+        () =>
+          outcome === 'failed'
+            ? Promise.reject(new Error('boom'))
+            : Promise.resolve(),
+        {
+          connection: { host: redis.host, port: redis.port },
+          prefix: redis.queuePrefix,
+        },
+      );
+      try {
+        await processingQueue.add(
+          'process-video',
+          { videoId },
+          { jobId: videoId, attempts: 1 },
+        );
+        await waitFor(async () => {
+          const job = await processingQueue.getJob(videoId);
+          return job && (await job.getState()) === outcome ? true : undefined;
+        });
+      } finally {
+        await worker.close();
+      }
+    };
+
+    it('should publish when there is no job for the video', async () => {
+      const videoId = randomUUID();
+
+      await publisher.republish(videoId);
+
+      expect((await processingQueue.getJob(videoId))?.data).toEqual({
+        videoId,
+      });
+    });
+
+    it('should leave a waiting job alone, without duplicating it', async () => {
+      const videoId = randomUUID();
+      await publisher.publish(videoId);
+      const before = await processingQueue.getJob(videoId);
+
+      await publisher.republish(videoId);
+
+      const jobs = await processingQueue.getJobs(ALL_STATES);
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0].timestamp).toBe(before?.timestamp);
+    });
+
+    it.each(['failed', 'completed'] as const)(
+      'should replace a %s job with a new waiting one',
+      async (outcome) => {
+        const videoId = randomUUID();
+        await finishJob(videoId, outcome);
+
+        await publisher.republish(videoId);
+
+        const job = await processingQueue.getJob(videoId);
+        expect(await job?.getState()).toBe('waiting');
+        expect(job?.attemptsMade).toBe(0);
+        expect(job?.opts.attempts).toBe(3);
+      },
+    );
   });
 });

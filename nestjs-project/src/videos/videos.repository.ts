@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'node:crypto';
-import { QueryFailedError, Repository } from 'typeorm';
+import { IsNull, LessThan, QueryFailedError, Repository } from 'typeorm';
 import type { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 import { Video } from './entities/video.entity';
 import { generatePublicId } from './public-id.util';
@@ -129,6 +129,49 @@ export class VideosRepository {
       })
       .andWhere('upload_completed_at IS NOT NULL')
       .execute();
+
+    return (result.affected ?? 0) > 0;
+  }
+
+  /** Drafts whose upload was never completed and are older than `before`. */
+  async findAbandonedDrafts(before: Date, limit: number): Promise<Video[]> {
+    return this.repository.find({
+      where: {
+        status: VideoStatus.DRAFT,
+        upload_completed_at: IsNull(),
+        created_at: LessThan(before),
+      },
+      order: { created_at: 'ASC' },
+      take: limit,
+    });
+  }
+
+  /** Drafts whose upload completed before `before` but never left `draft`. */
+  async findCompletedAwaitingWorker(
+    before: Date,
+    limit: number,
+  ): Promise<Video[]> {
+    return this.repository.find({
+      where: {
+        status: VideoStatus.DRAFT,
+        upload_completed_at: LessThan(before),
+      },
+      order: { created_at: 'ASC' },
+      take: limit,
+    });
+  }
+
+  /**
+   * Deletes a draft only while its upload is still incomplete, so a completion
+   * that raced with the sweeper is never lost. Returns whether a row was
+   * deleted.
+   */
+  async deleteAbandonedDraft(videoId: string): Promise<boolean> {
+    const result = await this.repository.delete({
+      id: videoId,
+      status: VideoStatus.DRAFT,
+      upload_completed_at: IsNull(),
+    });
 
     return (result.affected ?? 0) > 0;
   }

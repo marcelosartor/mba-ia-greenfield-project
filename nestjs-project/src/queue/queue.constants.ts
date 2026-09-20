@@ -10,6 +10,8 @@ export const JOB_NAMES = {
   SWEEP_ABANDONED_UPLOADS: 'sweep-abandoned-uploads',
 } as const;
 
+export const SWEEPER_SCHEDULER_ID = 'abandoned-uploads-sweep';
+
 export const VIDEO_PROCESSING_JOB_OPTIONS = {
   attempts: 3,
   backoff: { type: 'exponential', delay: 5000 },

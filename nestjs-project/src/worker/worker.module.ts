@@ -6,6 +6,9 @@ import { StorageModule } from '../storage/storage.module';
 import { UsersModule } from '../users/users.module';
 import { VideosRepositoryModule } from '../videos/videos-repository.module';
 import { MediaModule } from './media/media.module';
+import { UploadsSweeperProcessor } from './uploads-sweeper.processor';
+import { UploadsSweeperScheduler } from './uploads-sweeper.scheduler';
+import { UploadsSweeperService } from './uploads-sweeper.service';
 import { VideoProcessor } from './video.processor';
 
 /** Root module of the video worker: no HTTP, only the queue consumer. */
@@ -22,6 +25,11 @@ import { VideoProcessor } from './video.processor';
     // queries them.
     UsersModule,
   ],
-  providers: [VideoProcessor],
+  providers: [
+    VideoProcessor,
+    UploadsSweeperService,
+    UploadsSweeperProcessor,
+    UploadsSweeperScheduler,
+  ],
 })
 export class WorkerModule {}

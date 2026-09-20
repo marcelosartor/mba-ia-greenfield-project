@@ -22,4 +22,22 @@ export class VideoProcessingPublisher {
       { jobId: videoId },
     );
   }
+
+  /**
+   * Publishes again a video whose job may still be around. A job that is
+   * waiting, delayed or running is left alone (it will do the work). A job
+   * that already ended (`failed` or `completed`) is removed first: it keeps its
+   * id, so a plain `publish` would be discarded as a duplicate.
+   */
+  async republish(videoId: string): Promise<void> {
+    const existing = await this.queue.getJob(videoId);
+    if (existing) {
+      const state = await existing.getState();
+      if (state !== 'failed' && state !== 'completed') {
+        return;
+      }
+      await existing.remove();
+    }
+    await this.publish(videoId);
+  }
 }

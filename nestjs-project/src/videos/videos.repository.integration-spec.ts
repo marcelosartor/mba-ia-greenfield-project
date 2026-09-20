@@ -320,4 +320,83 @@ describe('VideosRepository (integration)', () => {
       },
     );
   });
+
+  describe('sweeper queries', () => {
+    const backdate = (
+      id: string,
+      column: 'created_at' | 'upload_completed_at',
+      when: Date,
+    ): Promise<unknown> =>
+      dataSource.query(`UPDATE "videos" SET "${column}" = $1 WHERE "id" = $2`, [
+        when,
+        id,
+      ]);
+    const daysAgo = (days: number): Date =>
+      new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    it('should find only old drafts whose upload was never completed', async () => {
+      const abandoned = await createDraft('abandoned');
+      await createDraft('recent'); // created now: not abandoned
+      const completed = await createDraft('completed');
+      const notDraft = await createDraft('not draft');
+      await repository.markUploadCompleted(completed.id);
+      await videoRepository.update(
+        { id: notDraft.id },
+        { status: VideoStatus.ERROR },
+      );
+      for (const video of [abandoned, completed, notDraft]) {
+        await backdate(video.id, 'created_at', daysAgo(2));
+      }
+
+      const found = await repository.findAbandonedDrafts(daysAgo(1), 10);
+
+      expect(found.map((video) => video.id)).toEqual([abandoned.id]);
+    });
+
+    it('should find drafts whose upload completed before the limit', async () => {
+      const waiting = await createDraft('waiting');
+      const fresh = await createDraft('fresh'); // completed now: inside the grace
+      await createDraft('incomplete'); // no completed upload
+      const ready = await createDraft('ready');
+      await repository.markUploadCompleted(waiting.id);
+      await repository.markUploadCompleted(fresh.id);
+      await repository.markUploadCompleted(ready.id);
+      await videoRepository.update(
+        { id: ready.id },
+        { status: VideoStatus.READY },
+      );
+      for (const video of [waiting, ready]) {
+        await backdate(video.id, 'upload_completed_at', daysAgo(1));
+      }
+
+      const found = await repository.findCompletedAwaitingWorker(
+        daysAgo(0.5),
+        10,
+      );
+
+      expect(found.map((video) => video.id)).toEqual([waiting.id]);
+    });
+
+    it('should respect the batch limit, oldest first', async () => {
+      const older = await createDraft('older');
+      const newer = await createDraft('newer');
+      await backdate(older.id, 'created_at', daysAgo(3));
+      await backdate(newer.id, 'created_at', daysAgo(2));
+
+      const found = await repository.findAbandonedDrafts(daysAgo(1), 1);
+
+      expect(found.map((video) => video.id)).toEqual([older.id]);
+    });
+
+    it('should delete an abandoned draft only while its upload is incomplete', async () => {
+      const abandoned = await createDraft('abandoned');
+      const completed = await createDraft('completed');
+      await repository.markUploadCompleted(completed.id);
+
+      expect(await repository.deleteAbandonedDraft(abandoned.id)).toBe(true);
+      expect(await repository.deleteAbandonedDraft(completed.id)).toBe(false);
+      expect(await repository.deleteAbandonedDraft(abandoned.id)).toBe(false);
+      expect(await videoRepository.countBy({ id: completed.id })).toBe(1);
+    });
+  });
 });
