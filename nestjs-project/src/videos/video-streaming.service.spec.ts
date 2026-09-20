@@ -168,6 +168,62 @@ describe('VideoStreamingService', () => {
     });
   });
 
+  describe('download', () => {
+    beforeEach(() => {
+      repository.findByPublicId.mockResolvedValue({
+        ...readyVideo,
+        title: 'Meu vídeo: teste/1',
+      });
+    });
+
+    it('should read the whole object without a Range and answer with the attachment headers', async () => {
+      const result = await service.download('abcdefghijk');
+
+      expect(storage.getObjectRange).toHaveBeenCalledWith(
+        'videos',
+        readyVideo.video_key,
+      );
+      expect(result.body).toBe(body);
+      expect(result.headers).toEqual({
+        'Content-Type': 'video/mp4',
+        'Content-Length': String(TOTAL),
+        'Content-Disposition': `attachment; filename="Meu video teste 1.mp4"; filename*=UTF-8''Meu%20v%C3%ADdeo%20teste%201.mp4`,
+        'Cache-Control': 'no-cache',
+        ETag: '"etag"',
+      });
+    });
+
+    it('should throw VideoNotFoundException for an unknown public_id', async () => {
+      repository.findByPublicId.mockResolvedValue(null);
+
+      await expect(service.download('aaaaaaaaaaa')).rejects.toBeInstanceOf(
+        VideoNotFoundException,
+      );
+    });
+
+    it.each([VideoStatus.DRAFT, VideoStatus.PROCESSING, VideoStatus.ERROR])(
+      'should throw VideoNotReadyException for a video in %s',
+      async (status) => {
+        repository.findByPublicId.mockResolvedValue({ ...readyVideo, status });
+
+        await expect(service.download('abcdefghijk')).rejects.toBeInstanceOf(
+          VideoNotReadyException,
+        );
+        expect(storage.getObjectRange).not.toHaveBeenCalled();
+      },
+    );
+
+    it('should propagate a storage failure', async () => {
+      storage.getObjectRange.mockRejectedValue(
+        new StorageUnavailableException(),
+      );
+
+      await expect(service.download('abcdefghijk')).rejects.toBeInstanceOf(
+        StorageUnavailableException,
+      );
+    });
+  });
+
   it('should fall back to the head metadata when the read has none', async () => {
     storage.getObjectRange.mockResolvedValue({ body, contentLength: TOTAL });
 

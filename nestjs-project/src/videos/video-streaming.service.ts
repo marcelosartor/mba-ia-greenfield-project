@@ -6,6 +6,11 @@ import {
   VideoNotReadyException,
 } from '../common/exceptions/domain.exception';
 import { StorageService } from '../storage/storage.service';
+import type { Video } from './entities/video.entity';
+import {
+  buildContentDisposition,
+  buildDownloadFilename,
+} from './filename.util';
 import { parseRange } from './range.util';
 import { VideoStatus } from './video-status.enum';
 import { VideosRepository } from './videos.repository';
@@ -14,6 +19,11 @@ const DEFAULT_CONTENT_TYPE = 'application/octet-stream';
 
 export interface VideoStream {
   statusCode: 200 | 206;
+  headers: Record<string, string>;
+  body: Readable;
+}
+
+export interface VideoDownload {
   headers: Record<string, string>;
   body: Readable;
 }
@@ -34,13 +44,7 @@ export class VideoStreamingService {
     publicId: string,
     rangeHeader: string | undefined,
   ): Promise<VideoStream> {
-    const video = await this.videosRepository.findByPublicId(publicId);
-    if (!video) {
-      throw new VideoNotFoundException();
-    }
-    if (video.status !== VideoStatus.READY) {
-      throw new VideoNotReadyException();
-    }
+    const video = await this.loadReadyVideo(publicId);
 
     const bucket = this.storageService.videosBucket;
     const head = await this.storageService.headObject(bucket, video.video_key);
@@ -77,5 +81,39 @@ export class VideoStreamingService {
     }
     headers['Content-Length'] = String(totalBytes);
     return { statusCode: 200, headers, body: object.body };
+  }
+
+  /** The whole file as an attachment, streamed from the object storage. */
+  async download(publicId: string): Promise<VideoDownload> {
+    const video = await this.loadReadyVideo(publicId);
+
+    const object = await this.storageService.getObjectRange(
+      this.storageService.videosBucket,
+      video.video_key,
+    );
+
+    const headers: Record<string, string> = {
+      'Content-Type': object.contentType ?? DEFAULT_CONTENT_TYPE,
+      'Content-Length': String(object.contentLength),
+      'Content-Disposition': buildContentDisposition(
+        buildDownloadFilename(video.title, video.video_key),
+      ),
+      'Cache-Control': 'no-cache',
+    };
+    if (object.etag) {
+      headers.ETag = object.etag;
+    }
+    return { headers, body: object.body };
+  }
+
+  private async loadReadyVideo(publicId: string): Promise<Video> {
+    const video = await this.videosRepository.findByPublicId(publicId);
+    if (!video) {
+      throw new VideoNotFoundException();
+    }
+    if (video.status !== VideoStatus.READY) {
+      throw new VideoNotReadyException();
+    }
+    return video;
   }
 }

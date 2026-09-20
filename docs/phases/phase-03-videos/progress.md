@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 15/19 completed
+**SIs:** 16/19 completed
 
 ### SI-03.1 — Configurar dependências, namespaces de config e variáveis de ambiente de storage e fila
 - **Status:** completed
@@ -198,9 +198,14 @@
   - Helpers novos em `src/test/stream-test-utils.ts` (`randomContent`, `sha256`, `digestStream`), reaproveitáveis no download do SI-03.16.
 
 ### SI-03.16 — Endpoint GET /videos/{public_id}/download
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 29 passing novos (filename.util.spec 22, video-streaming.service.spec +6 do `download`, video-download.integration-spec 1 contra o MinIO real) + 6 no e2e `test/videos-download.e2e-spec.ts` (do spec `videos-download.plan.md`); suíte completa 447 passing (55 suítes), e2e 101 passing; `npx tsc --noEmit` exit 0; `npm run lint` 0 erros (23 warnings preexistentes); prettier sem problemas nos arquivos do SI
+- **Observations:**
+  - Os quatro critérios do plano passam: `200` sem `Authorization` com `Content-Length` 2097152 e o mesmo SHA-256 do original; `Content-Disposition: attachment; filename="…mp4"` com nome saneado e `filename*` codificado; `409 VIDEO_NOT_READY` para `draft`/`processing`/`error`; `404 VIDEO_NOT_FOUND`.
+  - Nome do arquivo: o título `Meu vídeo: teste/1` vira `Meu vídeo teste 1.mp4` (caracteres inseguros `\ / : * ? " < > |` e de controle, incluindo quebras de linha e nulo, viram espaço e os espaços são colapsados; pontos no início e no fim são removidos para nunca gerar arquivo oculto; vazio cai para `video`; corte em 100 caracteres). A extensão vem da `video_key`, em minúsculas e só alfanumérica. O `filename` simples é ASCII (acentos removidos por NFD, o que não tem equivalente vira `_`), e o `filename*=UTF-8''…` (RFC 8187, com `' ( ) *` também codificados) só é enviado quando o nome tem caracteres não ASCII. O teste confere que nada capaz de quebrar o cabeçalho (`\r`, `\n`, aspas) chega ao `filename`.
+  - `download` lê o objeto inteiro com `getObjectRange` sem `Range` e usa o `Content-Length` do próprio objeto (sem `headObject`, ao contrário do stream, que precisa do total para interpretar o `Range`); acrescentei `Cache-Control: no-cache` e `ETag`, pelo mesmo motivo do stream (até a Fase 04 nenhuma cache intermediária deve reter o vídeo).
+  - Refatorei o que o stream e o download têm em comum: `loadReadyVideo` no `VideoStreamingService` (404/409) e `pipeStorageBody` no controller (cabeçalhos + destruição do stream do storage quando o cliente fecha a conexão, comportamento verificado por mutação no SI-03.15), sem mudar o comportamento do stream (os 11 testes dele seguem passando).
+  - Não repeti o teste de abandono do cliente para o download: ele usa o mesmo `pipeStorageBody` já coberto no stream.
 
 ### SI-03.17 — Publicar o contrato OpenAPI e os exemplos de requisição dos vídeos
 - **Status:** pending

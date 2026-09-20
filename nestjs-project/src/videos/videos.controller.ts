@@ -19,6 +19,7 @@ import {
   getSchemaPath,
 } from '@nestjs/swagger';
 import type { Response } from 'express';
+import type { Readable } from 'node:stream';
 import type { JwtPayload } from '../auth/auth.types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Public } from '../auth/decorators/public.decorator';
@@ -325,10 +326,56 @@ export class VideosController {
   ): Promise<StreamableFile> {
     const video = await this.videoStreamingService.stream(publicId, range);
     response.status(video.statusCode);
-    response.set(video.headers);
+    return this.pipeStorageBody(response, video.headers, video.body);
+  }
+
+  @Public()
+  @Get(':publicId/download')
+  @ApiOperation({
+    summary: 'Download a video',
+    description:
+      'Sends the whole video file as an attachment, streamed from the object storage without loading it into memory.',
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'The video file, with a `Content-Disposition: attachment` header',
+    content: {
+      'video/mp4': { schema: { type: 'string', format: 'binary' } },
+    },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Video not found (VIDEO_NOT_FOUND)',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'Video is draft, processing or in error (VIDEO_NOT_READY)',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 502,
+    description: 'Object storage unavailable (STORAGE_UNAVAILABLE)',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  async downloadVideo(
+    @Param('publicId') publicId: string,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<StreamableFile> {
+    const video = await this.videoStreamingService.download(publicId);
+    return this.pipeStorageBody(response, video.headers, video.body);
+  }
+
+  private pipeStorageBody(
+    response: Response,
+    headers: Record<string, string>,
+    body: Readable,
+  ): StreamableFile {
+    response.set(headers);
     // Nest pipes the stream to the response but does not stop the source when
     // the client goes away; without this the storage read would stay open.
-    response.once('close', () => video.body.destroy());
-    return new StreamableFile(video.body);
+    response.once('close', () => body.destroy());
+    return new StreamableFile(body);
   }
 }
