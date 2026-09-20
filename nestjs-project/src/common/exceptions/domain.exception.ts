@@ -54,3 +54,25 @@ export class StorageUnavailableException extends DomainException {
     super('STORAGE_UNAVAILABLE', 502, 'Object storage is unavailable');
   }
 }
+
+export class ChannelNotFoundException extends DomainException {
+  constructor() {
+    super('CHANNEL_NOT_FOUND', 404, 'Authenticated user has no channel');
+  }
+}
+
+export class VideoTooLargeException extends DomainException {
+  constructor() {
+    super('VIDEO_TOO_LARGE', 413, 'Video exceeds the maximum allowed size');
+  }
+}
+
+export class UnsupportedVideoFormatException extends DomainException {
+  constructor() {
+    super(
+      'UNSUPPORTED_VIDEO_FORMAT',
+      415,
+      'Video extension or content type is not supported',
+    );
+  }
+}

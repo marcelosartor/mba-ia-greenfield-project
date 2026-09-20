@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 5/19 completed
+**SIs:** 6/19 completed
 
 ### SI-03.1 — Configurar dependências, namespaces de config e variáveis de ambiente de storage e fila
 - **Status:** completed
@@ -64,9 +64,19 @@
   - Ao listar os arrays de entidades, um `grep -v` meu escondeu dois specs de auth (refresh-token e verification-token); a suíte completa acusou a falha e foram corrigidos na mesma rodada.
 
 ### SI-03.6 — Endpoint POST /videos
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 24 passing nos arquivos novos (video-uploads.service.spec 16, video-uploads.service.integration-spec 2, test/videos-create.e2e-spec 6 [do spec `videos-create.plan.md`]) + 2 de `ChannelsService.findByUserId`; suíte completa 218 passing (36 suítes), e2e 59 passing; `npx tsc --noEmit` exit 0; `npm run lint` 0 erros (23 warnings preexistentes); prettier sem problemas nos arquivos do SI
+- **Observations:**
+  - `findByUserId` devolve `null` quando não há canal; quem lança `ChannelNotFoundException` é o `VideoUploadsService`, então o módulo de vídeos não consulta a entidade de outro domínio.
+  - A extensão é lida pelo último ponto do nome, não por `path.extname`, porque `extname('.mp4')` devolve vazio; um nome sem ponto ou com extensão fora da allowlist vira 415. O `content_type` é comparado sem diferenciar maiúsculas de minúsculas.
+  - Título do rascunho = nome do arquivo sem extensão, com `trim` e no máximo 100 caracteres; se sobrar vazio, `Untitled video`.
+  - A compensação de falha vive em `discardDraft`: se o storage falha ou se gravar o `upload_id` falha, o multipart é abortado (só se já foi aberto) e o rascunho é removido, e o erro original é relançado. Se o próprio abort falhar, só há log de aviso; o resto fica para o sweeper do SI-03.13.
+  - `VideosRepository` ganhou `setUploadId` e `deleteById` (o SI-03.5 não tinha).
+  - `VideosModule` agora depende de `ConfigModule` global (configs de storage e vídeo), então o `videos.module.spec` passou a registrá-lo.
+  - O script `test:e2e` não tinha `--runInBand`, apesar de o CLAUDE.md do projeto exigir. Com 4 suítes de e2e limpando as mesmas tabelas em paralelo apareceu contaminação (FK violada em `refresh_tokens`); adicionei `--runInBand` ao script.
+  - Criei `test/helpers/e2e-app.ts` (app com pipe e filtros do `main.ts`, `registerConfirmAndLogin`, `buildTestingModule` para overrides) para os e2e dos SIs 03.7 a 03.16 reutilizarem.
+  - O cenário de storage indisponível do e2e sobe um segundo app com `storageConfig.KEY` sobrescrito para `http://storage-down:9000` (host inexistente na rede do Compose); o rascunho é removido e a resposta é 502.
+  - Os testes de integração e e2e abortam os multiparts que abriram (no `afterEach`), para não acumular uploads incompletos no MinIO.
 
 ### SI-03.7 — Endpoint GET /videos/{public_id}/upload
 - **Status:** pending

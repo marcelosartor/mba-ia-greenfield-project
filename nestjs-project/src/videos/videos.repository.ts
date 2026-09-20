@@ -61,6 +61,14 @@ export class VideosRepository {
     return this.repository.findOneBy({ public_id: publicId });
   }
 
+  async setUploadId(videoId: string, uploadId: string): Promise<void> {
+    await this.repository.update({ id: videoId }, { upload_id: uploadId });
+  }
+
+  async deleteById(videoId: string): Promise<void> {
+    await this.repository.delete({ id: videoId });
+  }
+
   /**
    * Compare-and-set: moves the video to `to` only if it is currently in one of
    * the `from` statuses. Returns whether a row was updated, so an invalid
