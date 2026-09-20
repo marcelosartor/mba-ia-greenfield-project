@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 13/19 completed
+**SIs:** 14/19 completed
 
 ### SI-03.1 — Configurar dependências, namespaces de config e variáveis de ambiente de storage e fila
 - **Status:** completed
@@ -172,9 +172,15 @@
   - Limitação conhecida, prevista no TD-03 mas fora do plano: o sweeper parte das linhas do banco. Multiparts abertos no storage que não têm linha (por exemplo, se a criação do rascunho falhar depois de abrir o multipart e a compensação também falhar) não são encontrados; seria preciso listar os multiparts do próprio storage.
 
 ### SI-03.14 — Endpoint GET /videos/{public_id}
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 16 passing novos (videos.service.spec 6, videos.service.integration-spec 3, test/videos-get.e2e-spec 7 [do spec `videos-get.plan.md`, com o `it.each` dos três status expandido]); suíte completa 372 passing (50 suítes), e2e 84 passing; `npx tsc --noEmit` exit 0; `npm run lint` 0 erros (23 warnings preexistentes); prettier sem problemas nos arquivos do SI
+- **Observations:**
+  - `@ApiBearerAuth('access-token')` estava no nível da classe `VideosController` desde o SI-03.6. Como a regra dos controllers proíbe esse decorator em método `@Public()`, movi-o para cada um dos quatro métodos protegidos e o `GET :publicId` ficou só com `@Public()`.
+  - O resultado do processamento é semeado no e2e por `UPDATE` (o spec diz que o worker não roda neste teste); o worker do Compose não interfere, pois o e2e usa o prefixo de fila de teste e a app do teste não tem consumidor.
+  - A resposta expõe só `public_id`, `title`, `status`, `duration_seconds`, `width`, `height` e `created_at`; um teste unitário confere a lista exata de chaves, para que `video_key`, `thumbnail_key`, `upload_id`, o id interno e os metadados brutos nunca vazem numa rota pública. Outro teste de integração confere que o id interno (uuid) não resolve nada: a busca é só por `public_id`.
+  - `duration_seconds`, `width` e `height` são tipados `number | null` no DTO (a coluna aceita nulo quando o ffprobe não informa a duração), embora o contrato do plano os liste como números; um vídeo `ready` sempre tem largura e altura, e a duração só falta em arquivos sem essa informação.
+  - `VideosService` ficou separado do `VideoUploadsService`: um cuida da leitura pública de vídeos prontos, o outro da sessão de upload do dono.
+  - Um `public_id` de teste com 12 caracteres quebrou a primeira rodada da integração (a coluna é `varchar(11)`); corrigido para 11.
 
 ### SI-03.15 — Endpoint GET /videos/{public_id}/stream
 - **Status:** pending

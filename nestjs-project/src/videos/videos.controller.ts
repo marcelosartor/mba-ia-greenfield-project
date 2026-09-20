@@ -16,22 +16,28 @@ import {
 } from '@nestjs/swagger';
 import type { JwtPayload } from '../auth/auth.types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { Public } from '../auth/decorators/public.decorator';
 import { ApiErrorEnvelope } from '../common/openapi/api-error-envelope.dto';
 import { CreateVideoDto } from './dto/create-video.dto';
 import { RequestUploadPartsDto } from './dto/request-upload-parts.dto';
+import { VideoResponseDto } from './dto/video-response.dto';
 import { UploadCompletionResponseDto } from './dto/upload-completion-response.dto';
 import { UploadPartsResponseDto } from './dto/upload-parts-response.dto';
 import { UploadSessionResponseDto } from './dto/upload-session-response.dto';
 import { VideoUploadsService } from './video-uploads.service';
+import { VideosService } from './videos.service';
 import type { InitiatedUpload } from './videos.types';
 
 @ApiTags('videos')
-@ApiBearerAuth('access-token')
 @Controller('videos')
 export class VideosController {
-  constructor(private readonly videoUploadsService: VideoUploadsService) {}
+  constructor(
+    private readonly videoUploadsService: VideoUploadsService,
+    private readonly videosService: VideosService,
+  ) {}
 
   @Post()
+  @ApiBearerAuth('access-token')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Start a video upload',
@@ -89,6 +95,7 @@ export class VideosController {
   }
 
   @Get(':publicId/upload')
+  @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Get the state of an upload',
     description:
@@ -127,6 +134,7 @@ export class VideosController {
   }
 
   @Post(':publicId/upload/parts')
+  @ApiBearerAuth('access-token')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Get presigned URLs for upload parts',
@@ -177,6 +185,7 @@ export class VideosController {
   }
 
   @Post(':publicId/upload/completion')
+  @ApiBearerAuth('access-token')
   @HttpCode(HttpStatus.ACCEPTED)
   @ApiOperation({
     summary: 'Complete a video upload',
@@ -225,5 +234,33 @@ export class VideosController {
     @Param('publicId') publicId: string,
   ): Promise<UploadCompletionResponseDto> {
     return this.videoUploadsService.completeUpload(user.sub, publicId);
+  }
+
+  @Public()
+  @Get(':publicId')
+  @ApiOperation({
+    summary: 'Get a video',
+    description:
+      'Public metadata of a video, by its public identifier. Only videos that finished processing (`ready`) are served.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Video metadata',
+    type: VideoResponseDto,
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Video not found (VIDEO_NOT_FOUND)',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'Video is draft, processing or in error (VIDEO_NOT_READY)',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  async getVideo(
+    @Param('publicId') publicId: string,
+  ): Promise<VideoResponseDto> {
+    return this.videosService.getReadyVideo(publicId);
   }
 }

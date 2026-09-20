@@ -4,12 +4,13 @@ import { QueueModule } from '../queue/queue.module';
 import { StorageModule } from '../storage/storage.module';
 import { VideoUploadsService } from './video-uploads.service';
 import { VideosController } from './videos.controller';
+import { VideosService } from './videos.service';
 import { VideosRepositoryModule } from './videos-repository.module';
 
 @Module({
   imports: [VideosRepositoryModule, StorageModule, ChannelsModule, QueueModule],
   controllers: [VideosController],
-  providers: [VideoUploadsService],
+  providers: [VideoUploadsService, VideosService],
   exports: [VideosRepositoryModule],
 })
 export class VideosModule {}
