@@ -266,4 +266,58 @@ describe('VideosRepository (integration)', () => {
       expect(await videoRepository.countBy({ id: draft.id })).toBe(0);
     });
   });
+
+  describe('findById', () => {
+    it('should return the video or null', async () => {
+      const draft = await createDraft();
+
+      expect((await repository.findById(draft.id))?.public_id).toBe(
+        draft.public_id,
+      );
+      expect(
+        await repository.findById('00000000-0000-4000-8000-000000000000'),
+      ).toBeNull();
+    });
+  });
+
+  describe('startProcessing', () => {
+    it('should move a draft with a completed upload to processing', async () => {
+      const draft = await createDraft();
+      await repository.markUploadCompleted(draft.id);
+
+      expect(await repository.startProcessing(draft.id)).toBe(true);
+      expect((await repository.findById(draft.id))?.status).toBe(
+        VideoStatus.PROCESSING,
+      );
+    });
+
+    it('should accept the reentry of a video already in processing', async () => {
+      const draft = await createDraft();
+      await repository.markUploadCompleted(draft.id);
+      await repository.startProcessing(draft.id);
+
+      expect(await repository.startProcessing(draft.id)).toBe(true);
+    });
+
+    it('should refuse a draft whose upload is not completed', async () => {
+      const draft = await createDraft();
+
+      expect(await repository.startProcessing(draft.id)).toBe(false);
+      expect((await repository.findById(draft.id))?.status).toBe(
+        VideoStatus.DRAFT,
+      );
+    });
+
+    it.each([VideoStatus.READY, VideoStatus.ERROR])(
+      'should not touch a video that is already %s',
+      async (status) => {
+        const draft = await createDraft();
+        await repository.markUploadCompleted(draft.id);
+        await videoRepository.update({ id: draft.id }, { status });
+
+        expect(await repository.startProcessing(draft.id)).toBe(false);
+        expect((await repository.findById(draft.id))?.status).toBe(status);
+      },
+    );
+  });
 });

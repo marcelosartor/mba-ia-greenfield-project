@@ -97,6 +97,7 @@ describe('envValidationSchema — queue and video', () => {
     expect(result.error).toBeUndefined();
     expect(value.REDIS_HOST).toBe('redis');
     expect(value.REDIS_PORT).toBe(6379);
+    expect(value.QUEUE_PREFIX).toBe('bull');
   });
 
   it('should default the video settings', () => {

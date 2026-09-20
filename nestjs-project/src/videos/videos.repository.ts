@@ -61,6 +61,10 @@ export class VideosRepository {
     return this.repository.findOneBy({ public_id: publicId });
   }
 
+  async findById(videoId: string): Promise<Video | null> {
+    return this.repository.findOneBy({ id: videoId });
+  }
+
   async setUploadId(videoId: string, uploadId: string): Promise<void> {
     await this.repository.update({ id: videoId }, { upload_id: uploadId });
   }
@@ -103,6 +107,27 @@ export class VideosRepository {
       .set({ ...changes, status: to })
       .where('id = :videoId', { videoId })
       .andWhere('status IN (:...expected)', { expected })
+      .execute();
+
+    return (result.affected ?? 0) > 0;
+  }
+
+  /**
+   * Worker entry: `draft` -> `processing` (or `processing` -> `processing` when
+   * a retry or redelivery re-enters), only once the upload was completed.
+   * Returns false when the video is missing, already `ready`/`error`, or its
+   * upload is not complete.
+   */
+  async startProcessing(videoId: string): Promise<boolean> {
+    const result = await this.repository
+      .createQueryBuilder()
+      .update(Video)
+      .set({ status: VideoStatus.PROCESSING })
+      .where('id = :videoId', { videoId })
+      .andWhere('status IN (:...expected)', {
+        expected: [VideoStatus.DRAFT, VideoStatus.PROCESSING],
+      })
+      .andWhere('upload_completed_at IS NOT NULL')
       .execute();
 
     return (result.affected ?? 0) > 0;

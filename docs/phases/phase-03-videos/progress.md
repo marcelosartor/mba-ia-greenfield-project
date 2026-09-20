@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 10/19 completed
+**SIs:** 11/19 completed
 
 ### SI-03.1 — Configurar dependências, namespaces de config e variáveis de ambiente de storage e fila
 - **Status:** completed
@@ -131,9 +131,19 @@
   - O `MediaModule` só depende do `ConfigModule` global (para `videoConfig`); os serviços recebem a URL pronta, então ele não importa o `StorageModule`.
 
 ### SI-03.11 — Criar o worker e o VideoProcessor (caminho feliz)
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 7 passing novos (video.processor.integration-spec 5, worker.module.spec 2) + 6 novos de `VideosRepository` (`findById`, `startProcessing`) + 1 de env (`QUEUE_PREFIX`) e 1 de `redisConfig` ajustados; suíte completa 319 passing (44 suítes), e2e 77 passing; `npx tsc --noEmit` exit 0; `npm run lint` 0 erros (23 warnings preexistentes); prettier sem problemas nos arquivos do SI. Verificação de infra contra a stack no ar: `docker compose up -d video-worker` sobe o serviço, `ffprobe` 5.1.9 disponível no contêiner, nenhuma porta publicada e nenhum socket TCP escutando (só o DNS embutido do Docker em 127.0.0.11), e um vídeo publicado no prefixo `bull` chegou a `ready` pelo worker do Compose (duração 4, 320x240, h264, `thumbnail_key` gravada)
+- **Observations:**
+  - **Isolamento dos testes por prefixo de fila (necessidade descoberta aqui, fora do plano):** com o `video-worker` no Compose consumindo `video-processing`, qualquer teste que publicasse jobs (e2e de conclusão, integração) competiria com ele. Adicionei `QUEUE_PREFIX` (padrão `bull`; `redisConfig.queuePrefix`, Joi, `.env.example`, `.env` local), aplicado pelo `QueueModule` ao `forRootAsync` (o worker herda o prefixo das filas), e o `test/jest-setup-env.js`, carregado antes do dotenv nos dois jest configs, força `streamtube-test` nos testes. Prova de que era real: ao subir o worker pela primeira vez ele consumiu jobs órfãos de rodadas anteriores do e2e no prefixo `bull` (vídeos já apagados; ele os ignorou com aviso).
+  - `WorkerModule` importa `appConfigModule`, `DatabaseModule`, `QueueModule`, `StorageModule`, `MediaModule`, `VideosRepositoryModule` e `UsersModule`; o `UsersModule` está lá só para registrar `User` e `Channel`, porque o TypeORM exige o grafo inteiro de entidades de `Video` (Video → Channel → User) e a falha era "Entity metadata for Video#channel was not found". Não há controllers.
+  - Refatorações mínimas para não duplicar configuração entre API e worker: `src/config/app-config.module.ts` (o `ConfigModule.forRoot` global), `src/database/database.module.ts` (o `TypeOrmModule.forRootAsync`) e `src/videos/videos-repository.module.ts` (entidade + repositório, sem controller); `AppModule` e `VideosModule` passaram a usá-los, sem mudar comportamento.
+  - Transições do processor: `VideosRepository.startProcessing` faz `draft`/`processing` → `processing` exigindo `upload_completed_at IS NOT NULL` (a reentrada `processing` → `processing` cobre retentativa e redelivery) e a conclusão usa `transitionStatus(processing → ready)` com metadados, `thumbnail_key` e `error_code`/`error_message` nulos. Vídeo inexistente ou fora de `draft`/`processing` termina o job como no-op com log (isso já adianta parte da idempotência do SI-03.12, que acrescenta os testes e os caminhos de falha).
+  - A concorrência vem de `videoConfig.workerConcurrency`, que um argumento de decorator não consegue ler; ela é aplicada em `onApplicationBootstrap` por `this.worker.concurrency = …` (o setter existe no `Worker` do BullMQ; a doc do `@nestjs/bullmq` consultada no context7 não cobre configuração dinâmica, então conferi os tipos instalados). Teste confere o valor.
+  - A URL pré-assinada da origem vale `processingTimeoutMs` + 60 s, para não expirar durante uma leitura longa. O thumbnail vai para `thumbnails/{videoId}/default.jpg` (chave determinística; retentativa sobrescreve o mesmo objeto).
+  - Scripts `start:worker` (`nest start --entryFile worker`) e `start:worker:dev` (com `--watch`); o serviço `video-worker` do Compose usa o segundo, com `restart: unless-stopped`, mesma imagem e volume do `nestjs-api`, e `depends_on` em `db`, `redis` e `minio` saudáveis e `minio-init` concluído.
+  - Limitações do modo dev do worker: (a) `nest start --watch` recompila para o mesmo `dist/` que o `start:dev` da API usa (`deleteOutDir` ativo); rodar os dois ao mesmo tempo pode se atropelar na inicialização; (b) `docker compose stop` termina o wrapper do Nest CLI em menos de 1 s com código 1, então o `enableShutdownHooks` do `src/worker.ts` só garante término limpo dos jobs quando o worker roda direto com `node dist/worker` (`start:worker`); um job interrompido é recuperado pelo mecanismo de jobs travados do BullMQ. Não medi o encerramento limpo com `node dist/worker`.
+  - O `worker.module.spec` sobrescreve o `VideoProcessor` por `{}` para não iniciar o consumidor da fila durante a checagem de DI, e confere que o módulo não declara controllers.
+  - Limpei dos buckets do MinIO local objetos órfãos de rodadas antigas do e2e e do meu teste de fumaça (o teste de fumaça era um script temporário, removido).
 
 ### SI-03.12 — Tratar falhas, retentativas, DLQ e idempotência no worker
 - **Status:** pending

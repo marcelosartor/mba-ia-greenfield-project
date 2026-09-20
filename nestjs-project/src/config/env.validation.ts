@@ -30,6 +30,7 @@ export const envValidationSchema = Joi.object({
   STORAGE_PUBLIC_ENDPOINT: Joi.string().uri().optional(),
   REDIS_HOST: Joi.string().default('redis'),
   REDIS_PORT: Joi.number().port().default(6379),
+  QUEUE_PREFIX: Joi.string().default('bull'),
   VIDEO_UPLOAD_PART_SIZE_BYTES: Joi.number()
     .integer()
     .min(5242880)

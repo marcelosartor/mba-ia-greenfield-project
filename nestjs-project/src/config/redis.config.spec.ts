@@ -6,6 +6,7 @@ import videoConfig from './video.config';
 const KEYS = [
   'REDIS_HOST',
   'REDIS_PORT',
+  'QUEUE_PREFIX',
   'VIDEO_UPLOAD_PART_SIZE_BYTES',
   'VIDEO_WORKER_CONCURRENCY',
   'VIDEO_PROCESSING_TIMEOUT_MS',
@@ -44,15 +45,20 @@ describe('redisConfig', () => {
     const { redis } = await loadConfigs({
       REDIS_HOST: 'queue',
       REDIS_PORT: '6380',
+      QUEUE_PREFIX: 'my-prefix',
     });
 
-    expect(redis).toEqual({ host: 'queue', port: 6380 });
+    expect(redis).toEqual({
+      host: 'queue',
+      port: 6380,
+      queuePrefix: 'my-prefix',
+    });
   });
 
-  it('should default the host to the Compose service name', async () => {
+  it('should default to the Compose service name, port 6379 and the bull prefix', async () => {
     const { redis } = await loadConfigs({});
 
-    expect(redis).toEqual({ host: 'redis', port: 6379 });
+    expect(redis).toEqual({ host: 'redis', port: 6379, queuePrefix: 'bull' });
   });
 });
 
