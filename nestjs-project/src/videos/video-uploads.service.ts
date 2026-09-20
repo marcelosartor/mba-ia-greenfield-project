@@ -5,14 +5,18 @@ import {
   ChannelNotFoundException,
   UnsupportedVideoFormatException,
   UploadAlreadyCompletedException,
+  UploadIncompleteException,
   VideoAccessDeniedException,
   VideoNotFoundException,
   VideoTooLargeException,
 } from '../common/exceptions/domain.exception';
 import videoConfig from '../config/video.config';
+import { VideoProcessingPublisher } from '../queue/video-processing.publisher';
 import { StorageService } from '../storage/storage.service';
+import type { StorageUploadedPart } from '../storage/storage.types';
 import { CreateVideoDto } from './dto/create-video.dto';
 import type { RequestUploadPartsDto } from './dto/request-upload-parts.dto';
+import type { UploadCompletionResponseDto } from './dto/upload-completion-response.dto';
 import type { UploadPartsResponseDto } from './dto/upload-parts-response.dto';
 import type { UploadSessionResponseDto } from './dto/upload-session-response.dto';
 import type { Video } from './entities/video.entity';
@@ -47,6 +51,7 @@ export class VideoUploadsService {
     private readonly channelsService: ChannelsService,
     private readonly videosRepository: VideosRepository,
     private readonly storageService: StorageService,
+    private readonly videoProcessingPublisher: VideoProcessingPublisher,
     @Inject(videoConfig.KEY)
     private readonly config: ConfigType<typeof videoConfig>,
   ) {}
@@ -144,12 +149,120 @@ export class VideoUploadsService {
     return { parts, expires_in: UPLOAD_URL_EXPIRATION_SECONDS };
   }
 
+  /**
+   * Confirms the end of the upload. Idempotent: once `upload_completed_at` is
+   * set, repeating the call returns the same answer without completing the
+   * multipart again or publishing another job.
+   */
+  async completeUpload(
+    userId: string,
+    publicId: string,
+  ): Promise<UploadCompletionResponseDto> {
+    const video = await this.loadOwnedVideo(userId, publicId);
+    if (video.upload_completed_at !== null) {
+      return this.toCompletionResponse(video);
+    }
+    const uploadId = video.upload_id;
+    if (!uploadId) {
+      throw new Error(`Video ${video.id} has no open multipart upload`);
+    }
+
+    try {
+      const parts = await this.validateParts(
+        video,
+        uploadId,
+        await this.storageService.listParts(video.video_key, uploadId),
+      );
+      await this.storageService.completeMultipartUpload(
+        video.video_key,
+        uploadId,
+        parts.map(({ partNumber, etag }) => ({ partNumber, etag })),
+      );
+    } catch (error) {
+      // A concurrent confirmation of the same upload already completed the
+      // multipart; the storage no longer knows this upload id.
+      if (
+        (error as { name?: string }).name === 'NoSuchUpload' &&
+        (await this.wasCompletedMeanwhile(publicId))
+      ) {
+        return this.toCompletionResponse(video);
+      }
+      throw error;
+    }
+
+    const marked = await this.videosRepository.markUploadCompleted(video.id);
+    if (marked) {
+      await this.publishProcessingJob(video.id);
+    }
+
+    return this.toCompletionResponse(video);
+  }
+
   /** Owner = the user whose channel owns the video (channels.user_id = sub). */
   async assertOwner(userId: string, video: Video): Promise<void> {
     const channel = await this.channelsService.findByUserId(userId);
     if (!channel || channel.id !== video.channel_id) {
       throw new VideoAccessDeniedException();
     }
+  }
+
+  /**
+   * Sequence 1..N, every part but the last with exactly `part_size_bytes`, and
+   * a total within the size limit. Over the limit the multipart is aborted and
+   * the draft removed.
+   */
+  private async validateParts(
+    video: Video,
+    uploadId: string,
+    parts: StorageUploadedPart[],
+  ): Promise<StorageUploadedPart[]> {
+    const totalBytes = parts.reduce((sum, part) => sum + part.sizeBytes, 0);
+    if (totalBytes > MAX_VIDEO_SIZE_BYTES) {
+      await this.discardDraft(video.id, video.video_key, uploadId);
+      throw new VideoTooLargeException();
+    }
+
+    const sorted = [...parts].sort((a, b) => a.partNumber - b.partNumber);
+    const lastIndex = sorted.length - 1;
+    const valid =
+      sorted.length > 0 &&
+      sorted.every(
+        (part, index) =>
+          part.partNumber === index + 1 &&
+          (index === lastIndex || part.sizeBytes === this.config.partSizeBytes),
+      );
+    if (!valid) {
+      throw new UploadIncompleteException();
+    }
+    return sorted;
+  }
+
+  private async wasCompletedMeanwhile(publicId: string): Promise<boolean> {
+    const current = await this.videosRepository.findByPublicId(publicId);
+    return current !== null && current.upload_completed_at !== null;
+  }
+
+  /**
+   * The job is published only after the completion is stored. A failure here
+   * must not undo the completion: it is logged and the sweeper republishes
+   * the job for videos whose upload is complete but never left `draft`.
+   */
+  private async publishProcessingJob(videoId: string): Promise<void> {
+    try {
+      await this.videoProcessingPublisher.publish(videoId);
+    } catch (error) {
+      this.logger.error(
+        `Could not publish the processing job of video ${videoId}: ${String(error)}`,
+      );
+    }
+  }
+
+  private toCompletionResponse(video: Video): UploadCompletionResponseDto {
+    return {
+      public_id: video.public_id,
+      status: video.status,
+      upload_completed: true,
+    };
   }
 
   private async loadOwnedVideo(

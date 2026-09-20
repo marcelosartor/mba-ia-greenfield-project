@@ -7,7 +7,7 @@ import { StorageService } from '../src/storage/storage.service';
 import { cleanAllTables } from '../src/test/create-test-data-source';
 import { Video } from '../src/videos/entities/video.entity';
 import { createE2eApp, registerConfirmAndLogin } from './helpers/e2e-app';
-import { abortOpenUploads, putPart } from './helpers/video-e2e';
+import { discardStoredUploads, uploadParts } from './helpers/video-e2e';
 
 const PART_SIZE = 5_242_880;
 
@@ -58,7 +58,7 @@ describe('GET /videos/:public_id/upload (e2e)', () => {
   });
 
   afterEach(async () => {
-    await abortOpenUploads(
+    await discardStoredUploads(
       storage,
       await dataSource.getRepository(Video).find(),
     );
@@ -69,18 +69,11 @@ describe('GET /videos/:public_id/upload (e2e)', () => {
     return token ? req.set('Authorization', `Bearer ${token}`) : req;
   };
 
-  const uploadPart = async (partNumber: number): Promise<void> => {
-    const url = await storage.presignUploadPart(
-      video.video_key,
-      video.upload_id as string,
-      partNumber,
-    );
-    await putPart(url, partNumber === 3 ? 1_517_568 : PART_SIZE);
-  };
-
   it('should list the parts already uploaded for the owner', async () => {
-    await uploadPart(1);
-    await uploadPart(2);
+    await uploadParts(app, tokenA, video.public_id, {
+      1: PART_SIZE,
+      2: PART_SIZE,
+    });
 
     const res = await getSession(video.public_id).expect(200);
 
@@ -110,14 +103,15 @@ describe('GET /videos/:public_id/upload (e2e)', () => {
   });
 
   it('should not list parts once the upload is completed', async () => {
-    await uploadPart(1);
-    await uploadPart(2);
-    await uploadPart(3);
-    // The completion endpoint arrives in SI-03.9; until then the marker it
-    // writes is set directly, and this scenario switches to the endpoint there.
-    await dataSource
-      .getRepository(Video)
-      .update({ id: video.id }, { upload_completed_at: new Date() });
+    await uploadParts(app, tokenA, video.public_id, {
+      1: PART_SIZE,
+      2: PART_SIZE,
+      3: 1_514_240,
+    });
+    await request(app.getHttpServer())
+      .post(`/videos/${video.public_id}/upload/completion`)
+      .set('Authorization', `Bearer ${tokenA}`)
+      .expect(202);
 
     const res = await getSession(video.public_id).expect(200);
 

@@ -65,6 +65,22 @@ export class VideosRepository {
     await this.repository.update({ id: videoId }, { upload_id: uploadId });
   }
 
+  /**
+   * Single UPDATE that records the completion and clears the multipart id.
+   * Returns false when another request completed the upload first.
+   */
+  async markUploadCompleted(videoId: string): Promise<boolean> {
+    const result = await this.repository
+      .createQueryBuilder()
+      .update(Video)
+      .set({ upload_completed_at: () => 'now()', upload_id: null })
+      .where('id = :videoId', { videoId })
+      .andWhere('upload_completed_at IS NULL')
+      .execute();
+
+    return (result.affected ?? 0) > 0;
+  }
+
   async deleteById(videoId: string): Promise<void> {
     await this.repository.delete({ id: videoId });
   }

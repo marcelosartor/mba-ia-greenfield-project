@@ -6,11 +6,13 @@ import {
   StorageUnavailableException,
   UnsupportedVideoFormatException,
   UploadAlreadyCompletedException,
+  UploadIncompleteException,
   VideoAccessDeniedException,
   VideoNotFoundException,
   VideoTooLargeException,
 } from '../common/exceptions/domain.exception';
 import type videoConfig from '../config/video.config';
+import type { VideoProcessingPublisher } from '../queue/video-processing.publisher';
 import type { StorageService } from '../storage/storage.service';
 import type { CreateVideoDto } from './dto/create-video.dto';
 import type { Video } from './entities/video.entity';
@@ -45,13 +47,16 @@ describe('VideoUploadsService', () => {
     findByPublicId: jest.Mock;
     setUploadId: jest.Mock;
     deleteById: jest.Mock;
+    markUploadCompleted: jest.Mock;
   };
   let storageService: {
     createMultipartUpload: jest.Mock;
     abortMultipartUpload: jest.Mock;
     listParts: jest.Mock;
     presignUploadPart: jest.Mock;
+    completeMultipartUpload: jest.Mock;
   };
+  let publisher: { publish: jest.Mock };
   let service: VideoUploadsService;
 
   beforeEach(() => {
@@ -61,21 +66,25 @@ describe('VideoUploadsService', () => {
       findByPublicId: jest.fn(),
       setUploadId: jest.fn().mockResolvedValue(undefined),
       deleteById: jest.fn().mockResolvedValue(undefined),
+      markUploadCompleted: jest.fn().mockResolvedValue(true),
     };
     storageService = {
       createMultipartUpload: jest.fn().mockResolvedValue('upload-1'),
       abortMultipartUpload: jest.fn().mockResolvedValue(undefined),
       listParts: jest.fn().mockResolvedValue([]),
+      completeMultipartUpload: jest.fn().mockResolvedValue(undefined),
       presignUploadPart: jest
         .fn()
         .mockImplementation((_key: string, _id: string, n: number) =>
           Promise.resolve(`https://minio/part-${n}`),
         ),
     };
+    publisher = { publish: jest.fn().mockResolvedValue(undefined) };
     service = new VideoUploadsService(
       channelsService as unknown as ChannelsService,
       videosRepository as unknown as VideosRepository,
       storageService as unknown as StorageService,
+      publisher as unknown as VideoProcessingPublisher,
       config,
     );
   });
@@ -386,6 +395,213 @@ describe('VideoUploadsService', () => {
       await expect(
         service.requestPartUrls('user-1', 'abcdefghijk', { part_numbers: [1] }),
       ).rejects.toBeInstanceOf(StorageUnavailableException);
+    });
+  });
+
+  describe('completeUpload', () => {
+    const PART = 64 * 1024 * 1024;
+    const openVideo = {
+      ...draft,
+      channel_id: 'channel-1',
+      upload_id: 'upload-1',
+      upload_completed_at: null,
+    } as Video;
+    const part = (partNumber: number, sizeBytes = PART) => ({
+      partNumber,
+      sizeBytes,
+      etag: `"etag-${partNumber}"`,
+    });
+
+    beforeEach(() => {
+      videosRepository.findByPublicId.mockResolvedValue(openVideo);
+      storageService.listParts.mockResolvedValue([
+        part(1),
+        part(2),
+        part(3, 1000),
+      ]);
+    });
+
+    it('should complete the multipart, record the completion and publish the job', async () => {
+      const result = await service.completeUpload('user-1', 'abcdefghijk');
+
+      expect(storageService.completeMultipartUpload).toHaveBeenCalledWith(
+        openVideo.video_key,
+        'upload-1',
+        [
+          { partNumber: 1, etag: '"etag-1"' },
+          { partNumber: 2, etag: '"etag-2"' },
+          { partNumber: 3, etag: '"etag-3"' },
+        ],
+      );
+      expect(videosRepository.markUploadCompleted).toHaveBeenCalledWith(
+        'video-1',
+      );
+      expect(publisher.publish).toHaveBeenCalledWith('video-1');
+      expect(result).toEqual({
+        public_id: 'abcdefghijk',
+        status: 'draft',
+        upload_completed: true,
+      });
+    });
+
+    it('should publish only after the completion is recorded', async () => {
+      const order: string[] = [];
+      videosRepository.markUploadCompleted.mockImplementation(() => {
+        order.push('mark');
+        return Promise.resolve(true);
+      });
+      publisher.publish.mockImplementation(() => {
+        order.push('publish');
+        return Promise.resolve();
+      });
+
+      await service.completeUpload('user-1', 'abcdefghijk');
+
+      expect(order).toEqual(['mark', 'publish']);
+    });
+
+    it('should accept a single part smaller than the part size', async () => {
+      storageService.listParts.mockResolvedValue([part(1, 10)]);
+
+      await expect(
+        service.completeUpload('user-1', 'abcdefghijk'),
+      ).resolves.toMatchObject({ upload_completed: true });
+    });
+
+    it('should sort the parts by number before completing', async () => {
+      storageService.listParts.mockResolvedValue([part(2, 5), part(1)]);
+
+      await service.completeUpload('user-1', 'abcdefghijk');
+
+      const [, , completed] = storageService.completeMultipartUpload.mock
+        .calls[0] as [string, string, { partNumber: number }[]];
+      expect(completed.map((p) => p.partNumber)).toEqual([1, 2]);
+    });
+
+    it('should be idempotent once the upload is already completed', async () => {
+      videosRepository.findByPublicId.mockResolvedValue({
+        ...openVideo,
+        upload_id: null,
+        upload_completed_at: new Date(),
+      });
+
+      const result = await service.completeUpload('user-1', 'abcdefghijk');
+
+      expect(result.upload_completed).toBe(true);
+      expect(storageService.listParts).not.toHaveBeenCalled();
+      expect(storageService.completeMultipartUpload).not.toHaveBeenCalled();
+      expect(publisher.publish).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['a missing intermediate part', [part(1), part(3, 1000)]],
+      ['no part at all', []],
+      ['parts that do not start at 1', [part(2, 1000)]],
+      ['an intermediate part with the wrong size', [part(1, 10), part(2)]],
+    ])('should refuse %s', async (_label, parts) => {
+      storageService.listParts.mockResolvedValue(parts);
+
+      await expect(
+        service.completeUpload('user-1', 'abcdefghijk'),
+      ).rejects.toBeInstanceOf(UploadIncompleteException);
+      expect(storageService.completeMultipartUpload).not.toHaveBeenCalled();
+      expect(videosRepository.markUploadCompleted).not.toHaveBeenCalled();
+      expect(publisher.publish).not.toHaveBeenCalled();
+    });
+
+    it('should abort the multipart and remove the draft when the parts exceed 10 GiB', async () => {
+      storageService.listParts.mockResolvedValue([
+        part(1, 6 * 1024 ** 3),
+        part(2, 5 * 1024 ** 3),
+      ]);
+
+      await expect(
+        service.completeUpload('user-1', 'abcdefghijk'),
+      ).rejects.toBeInstanceOf(VideoTooLargeException);
+      expect(storageService.abortMultipartUpload).toHaveBeenCalledWith(
+        openVideo.video_key,
+        'upload-1',
+      );
+      expect(videosRepository.deleteById).toHaveBeenCalledWith('video-1');
+      expect(storageService.completeMultipartUpload).not.toHaveBeenCalled();
+      expect(publisher.publish).not.toHaveBeenCalled();
+    });
+
+    it('should still answer when the job cannot be published', async () => {
+      publisher.publish.mockRejectedValue(new Error('redis down'));
+
+      await expect(
+        service.completeUpload('user-1', 'abcdefghijk'),
+      ).resolves.toMatchObject({ upload_completed: true });
+      expect(videosRepository.markUploadCompleted).toHaveBeenCalled();
+    });
+
+    it('should not publish when another request recorded the completion first', async () => {
+      videosRepository.markUploadCompleted.mockResolvedValue(false);
+
+      await service.completeUpload('user-1', 'abcdefghijk');
+
+      expect(publisher.publish).not.toHaveBeenCalled();
+    });
+
+    it('should answer as completed when a concurrent request finished the multipart', async () => {
+      const noSuchUpload = Object.assign(new Error('gone'), {
+        name: 'NoSuchUpload',
+      });
+      storageService.listParts.mockRejectedValue(noSuchUpload);
+      videosRepository.findByPublicId
+        .mockResolvedValueOnce(openVideo)
+        .mockResolvedValueOnce({
+          ...openVideo,
+          upload_completed_at: new Date(),
+        });
+
+      await expect(
+        service.completeUpload('user-1', 'abcdefghijk'),
+      ).resolves.toMatchObject({ upload_completed: true });
+      expect(publisher.publish).not.toHaveBeenCalled();
+    });
+
+    it('should rethrow NoSuchUpload when the upload was not completed meanwhile', async () => {
+      const noSuchUpload = Object.assign(new Error('gone'), {
+        name: 'NoSuchUpload',
+      });
+      storageService.listParts.mockRejectedValue(noSuchUpload);
+
+      await expect(
+        service.completeUpload('user-1', 'abcdefghijk'),
+      ).rejects.toBe(noSuchUpload);
+    });
+
+    it('should propagate a storage failure without recording anything', async () => {
+      storageService.completeMultipartUpload.mockRejectedValue(
+        new StorageUnavailableException(),
+      );
+
+      await expect(
+        service.completeUpload('user-1', 'abcdefghijk'),
+      ).rejects.toBeInstanceOf(StorageUnavailableException);
+      expect(videosRepository.markUploadCompleted).not.toHaveBeenCalled();
+      expect(publisher.publish).not.toHaveBeenCalled();
+    });
+
+    it('should deny a user who is not the owner', async () => {
+      channelsService.findByUserId.mockResolvedValue({
+        id: 'channel-2',
+      } as Channel);
+
+      await expect(
+        service.completeUpload('user-2', 'abcdefghijk'),
+      ).rejects.toBeInstanceOf(VideoAccessDeniedException);
+      expect(storageService.listParts).not.toHaveBeenCalled();
+    });
+
+    it('should throw VideoNotFoundException for an unknown public_id', async () => {
+      videosRepository.findByPublicId.mockResolvedValue(null);
+
+      await expect(
+        service.completeUpload('user-1', 'aaaaaaaaaaa'),
+      ).rejects.toBeInstanceOf(VideoNotFoundException);
     });
   });
 });

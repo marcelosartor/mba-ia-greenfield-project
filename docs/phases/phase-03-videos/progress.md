@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 8/19 completed
+**SIs:** 9/19 completed
 
 ### SI-03.1 — Configurar dependências, namespaces de config e variáveis de ambiente de storage e fila
 - **Status:** completed
@@ -82,7 +82,7 @@
 - **Status:** completed
 - **Tests:** 14 passing novos (video-uploads.service.spec +6, video-uploads.service.integration-spec +3, test/videos-upload-session.e2e-spec 5 [do spec `videos-upload-session.plan.md`]); suíte completa 227 passing (36 suítes), e2e 64 passing; `npx tsc --noEmit` exit 0; `npm run lint` 0 erros (23 warnings preexistentes); prettier sem problemas nos arquivos do SI
 - **Observations:**
-  - Os cenários 1.1 e 1.5 do spec usam `POST /videos/{public_id}/upload/parts` e `/completion`, que só existem nos SI-03.8 e SI-03.9. Para o e2e passar agora, as partes são enviadas com URLs pré-assinadas geradas pelo `StorageService` (PUT real no MinIO) e o marcador `upload_completed_at` é gravado direto no banco. **Pendente:** trocar esses dois cenários pelos endpoints reais quando o SI-03.9 existir (já anotado no comentário do teste).
+  - Os cenários 1.1 e 1.5 do spec usam `POST .../upload/parts` e `/completion`, que só existiam nos SI-03.8 e SI-03.9; na entrega deste SI usavam URLs pré-assinadas geradas pelo `StorageService` e o marcador gravado no banco. **Resolvido no SI-03.9:** os dois cenários agora usam os endpoints reais.
   - `assertOwner` é async e recebe `(userId, video)`: o dono é quem tem canal com `id = video.channel_id`; usuário sem canal também recebe 403. É o método que os SI-03.8 e SI-03.9 reutilizam.
   - Vídeo inexistente responde 404 antes da checagem de dono, como no plano (`VIDEO_NOT_FOUND` vs `VIDEO_ACCESS_DENIED` revelam se o `public_id` existe; é o que o Error Catalog define).
   - `part_size_bytes` da resposta vem da configuração atual (`VIDEO_UPLOAD_PART_SIZE_BYTES`), pois a tabela `videos` não guarda o tamanho da parte; se a variável mudar com um upload em andamento, o valor devolvido muda. O modelo de dados do plano não prevê a coluna, então mantive assim.
@@ -94,7 +94,7 @@
 - **Status:** completed
 - **Tests:** 12 passing novos (video-uploads.service.spec +5, video-uploads.service.integration-spec +2, test/videos-upload-parts.e2e-spec 6 [do spec `videos-upload-parts.plan.md`]); suíte completa 234 passing (36 suítes), e2e 70 passing; `npx tsc --noEmit` exit 0; `npm run lint` 0 erros (23 warnings preexistentes); prettier sem problemas nos arquivos do SI
 - **Observations:**
-  - O cenário 1.3 do spec (rejeitar depois da conclusão) usa `POST .../upload/completion`, que só existe no SI-03.9; como no SI-03.7, o marcador `upload_completed_at` é gravado direto no banco. **Pendente:** trocar pelo endpoint real no SI-03.9 (junto com os cenários 1.1 e 1.5 do SI-03.7).
+  - O cenário 1.3 do spec (rejeitar depois da conclusão) usa `POST .../upload/completion`, que só existia no SI-03.9; na entrega deste SI o marcador era gravado direto no banco. **Resolvido no SI-03.9:** o cenário agora usa o endpoint real.
   - `part_numbers` é validado por `class-validator` (`ArrayMinSize(1)`, `ArrayMaxSize(100)`, `ArrayUnique`, `IsInt`, `Min(1)`, `Max(10000)` em cada item); os limites estão em `video-upload.constants.ts`. O e2e também cobre repetição, 0, 10001 e item que não é inteiro.
   - A extração do vídeo com verificação de dono virou `loadOwnedVideo` no `VideoUploadsService`, usado por `getUploadSession` e `requestPartUrls`; os SI-03.9 e seguintes de sessão de upload devem reutilizá-lo.
   - Um vídeo com `upload_completed_at` nulo mas sem `upload_id` (estado inconsistente, que o SI-03.6 não produz) lança um `Error` comum (500), não uma exceção de domínio.
@@ -102,9 +102,17 @@
   - O `PUT` direto do teste vai ao MinIO sem cabeçalho `Authorization` e é aceito, o que confirma que os bytes não passam pela API.
 
 ### SI-03.9 — Endpoint POST /videos/{public_id}/upload/completion
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 34 passing novos (video-uploads.service.spec +17 [total 44], video-uploads.service.integration-spec +6, videos.repository.integration-spec +4, test/videos-upload-completion.e2e-spec 7 [do spec `videos-upload-completion.plan.md`]); suíte completa 261 passing (36 suítes), e2e 77 passing; `npx tsc --noEmit` exit 0; `npm run lint` 0 erros (23 warnings preexistentes); prettier sem problemas nos arquivos do SI
+- **Observations:**
+  - Ordem das validações em `completeUpload`: dono → já concluído (devolve 202 sem tocar em nada) → soma das partes acima de 10 GiB (aborta o multipart, remove o rascunho, 413) → sequência 1..N com partes intermediárias iguais a `part_size_bytes` (409) → `completeMultipartUpload` → UPDATE único (`markUploadCompleted`) → publicação do job. A soma é checada antes da sequência para que o 413 apareça mesmo quando a lista de partes falsa do teste tem tamanhos irregulares.
+  - `markUploadCompleted` é `UPDATE … SET upload_completed_at = now(), upload_id = NULL WHERE id = $1 AND upload_completed_at IS NULL` e devolve se atualizou; só publica o job quando devolve `true`.
+  - Duas confirmações simultâneas: a segunda chamada lista ou completa um multipart que o storage já não conhece (`NoSuchUpload`). Se o vídeo já está concluído no banco, ela responde 202 sem publicar; se não está, o erro sobe. Um teste de integração com `Promise.all` de duas confirmações confirma um único job.
+  - Falha de publicação no Redis é só registrada em log (`Logger.error`) e a resposta continua 202, com o vídeo `draft` e `upload_completed_at` preenchido, para o sweeper (SI-03.13) republicar.
+  - Se o UPDATE falhar depois de o multipart já ter sido completado no storage, uma nova tentativa do cliente cai em `NoSuchUpload` e não em `upload_completed_at`; o erro sobe (500). Caso raro, não coberto pelo plano; o sweeper do SI-03.13 é quem lida com vídeos em estado assim.
+  - Os testes de integração passam a sobrescrever `videoConfig` com partes de 5 MiB (`overrideProvider`), e os testes de `VideosModule` carregam `redisConfig` porque o módulo agora importa o `QueueModule`. O teste do SI-03.6 que conferia `part_size_bytes: 67108864`/`part_count: 3` passou a conferir 5242880/39 para 200 MB.
+  - Criei `src/test/storage-test-client.ts` (cliente S3 direto, independente do código testado) para apagar objetos no `afterEach`, e o helper `discardStoredUploads` em `test/helpers/video-e2e.ts` (aborta multiparts abertos e apaga o objeto final); ele substituiu `abortOpenUploads`. Os e2e de create, session, parts e completion o usam, então não sobram objetos nem uploads incompletos no MinIO.
+  - Nesta rodada um `prettier --write src` meu reformatou por engano os templates `.hbs` de e-mail; revertidos com `git checkout` antes do commit (esses dois arquivos já falham no `prettier --check` desde antes, fora do escopo).
 
 ### SI-03.10 — Implementar MediaProbeService e ThumbnailService com ffprobe e ffmpeg
 - **Status:** pending

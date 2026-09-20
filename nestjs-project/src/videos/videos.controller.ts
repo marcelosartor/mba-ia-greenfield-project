@@ -19,6 +19,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { ApiErrorEnvelope } from '../common/openapi/api-error-envelope.dto';
 import { CreateVideoDto } from './dto/create-video.dto';
 import { RequestUploadPartsDto } from './dto/request-upload-parts.dto';
+import { UploadCompletionResponseDto } from './dto/upload-completion-response.dto';
 import { UploadPartsResponseDto } from './dto/upload-parts-response.dto';
 import { UploadSessionResponseDto } from './dto/upload-session-response.dto';
 import { VideoUploadsService } from './video-uploads.service';
@@ -173,5 +174,56 @@ export class VideosController {
     @Body() dto: RequestUploadPartsDto,
   ): Promise<UploadPartsResponseDto> {
     return this.videoUploadsService.requestPartUrls(user.sub, publicId, dto);
+  }
+
+  @Post(':publicId/upload/completion')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({
+    summary: 'Complete a video upload',
+    description:
+      'Validates the uploaded parts, completes the multipart upload and queues the video for processing. Idempotent: repeating the call for an already completed upload returns the same answer without queuing another job.',
+  })
+  @ApiResponse({
+    status: 202,
+    description: 'Upload completed; processing queued',
+    type: UploadCompletionResponseDto,
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Missing or invalid access token',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'The video belongs to another channel (VIDEO_ACCESS_DENIED)',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Video not found (VIDEO_NOT_FOUND)',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 409,
+    description:
+      'Parts missing, out of sequence or with an unexpected size (UPLOAD_INCOMPLETE)',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 413,
+    description:
+      'Parts add up to more than 10 GiB; the draft is discarded (VIDEO_TOO_LARGE)',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 502,
+    description: 'Object storage unavailable (STORAGE_UNAVAILABLE)',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  async completeUpload(
+    @CurrentUser() user: JwtPayload,
+    @Param('publicId') publicId: string,
+  ): Promise<UploadCompletionResponseDto> {
+    return this.videoUploadsService.completeUpload(user.sub, publicId);
   }
 }

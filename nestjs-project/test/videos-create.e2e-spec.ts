@@ -13,7 +13,7 @@ import {
   createE2eApp,
   registerConfirmAndLogin,
 } from './helpers/e2e-app';
-import { abortOpenUploads } from './helpers/video-e2e';
+import { discardStoredUploads } from './helpers/video-e2e';
 
 interface CreateVideoBody {
   public_id: string;
@@ -45,7 +45,7 @@ describe('POST /videos (e2e)', () => {
   });
 
   beforeEach(async () => {
-    await abortOpenUploads(
+    await discardStoredUploads(
       storage,
       await dataSource.getRepository(Video).find(),
     );
@@ -55,7 +55,7 @@ describe('POST /videos (e2e)', () => {
   });
 
   afterEach(async () => {
-    await abortOpenUploads(
+    await discardStoredUploads(
       storage,
       await dataSource.getRepository(Video).find(),
     );

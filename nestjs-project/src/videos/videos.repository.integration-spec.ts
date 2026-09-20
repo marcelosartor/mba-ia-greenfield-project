@@ -212,4 +212,58 @@ describe('VideosRepository (integration)', () => {
       expect(results.filter(Boolean)).toHaveLength(1);
     });
   });
+
+  describe('markUploadCompleted', () => {
+    it('should record the completion and clear the multipart id in one update', async () => {
+      const draft = await createDraft();
+      await repository.setUploadId(draft.id, 'upload-1');
+
+      const marked = await repository.markUploadCompleted(draft.id);
+
+      expect(marked).toBe(true);
+      const found = await videoRepository.findOneByOrFail({ id: draft.id });
+      expect(found.upload_completed_at).toBeInstanceOf(Date);
+      expect(found.upload_id).toBeNull();
+      expect(found.status).toBe(VideoStatus.DRAFT);
+    });
+
+    it('should not touch a video whose upload was already completed', async () => {
+      const draft = await createDraft();
+      await repository.markUploadCompleted(draft.id);
+      const firstCompletion = (
+        await videoRepository.findOneByOrFail({ id: draft.id })
+      ).upload_completed_at;
+
+      const marked = await repository.markUploadCompleted(draft.id);
+
+      expect(marked).toBe(false);
+      const found = await videoRepository.findOneByOrFail({ id: draft.id });
+      expect(found.upload_completed_at).toEqual(firstCompletion);
+    });
+
+    it('should let only one of two concurrent completions win', async () => {
+      const draft = await createDraft();
+
+      const results = await Promise.all([
+        repository.markUploadCompleted(draft.id),
+        repository.markUploadCompleted(draft.id),
+      ]);
+
+      expect(results.filter(Boolean)).toHaveLength(1);
+    });
+  });
+
+  describe('setUploadId and deleteById', () => {
+    it('should store the upload id and delete the video', async () => {
+      const draft = await createDraft();
+
+      await repository.setUploadId(draft.id, 'upload-9');
+      expect(
+        (await videoRepository.findOneByOrFail({ id: draft.id })).upload_id,
+      ).toBe('upload-9');
+
+      await repository.deleteById(draft.id);
+      expect(await videoRepository.countBy({ id: draft.id })).toBe(0);
+    });
+  });
 });

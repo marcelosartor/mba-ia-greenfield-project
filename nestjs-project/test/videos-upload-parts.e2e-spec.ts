@@ -7,7 +7,11 @@ import { StorageService } from '../src/storage/storage.service';
 import { cleanAllTables } from '../src/test/create-test-data-source';
 import { Video } from '../src/videos/entities/video.entity';
 import { createE2eApp, registerConfirmAndLogin } from './helpers/e2e-app';
-import { abortOpenUploads, putPart } from './helpers/video-e2e';
+import {
+  discardStoredUploads,
+  putPart,
+  uploadParts,
+} from './helpers/video-e2e';
 
 const PART_SIZE = 5_242_880;
 
@@ -56,7 +60,7 @@ describe('POST /videos/:public_id/upload/parts (e2e)', () => {
   });
 
   afterEach(async () => {
-    await abortOpenUploads(
+    await discardStoredUploads(
       storage,
       await dataSource.getRepository(Video).find(),
     );
@@ -92,14 +96,14 @@ describe('POST /videos/:public_id/upload/parts (e2e)', () => {
   });
 
   it('should refuse new URLs after the upload is completed', async () => {
-    const urls = (await requestParts([1, 2]).expect(201)).body as PartsBody;
-    await putPart(urls.parts[0].url, PART_SIZE);
-    await putPart(urls.parts[1].url, 6_000_000 - PART_SIZE);
-    // The completion endpoint arrives in SI-03.9; until then the marker it
-    // writes is set directly, and this scenario switches to the endpoint there.
-    await dataSource
-      .getRepository(Video)
-      .update({ id: video.id }, { upload_completed_at: new Date() });
+    await uploadParts(app, tokenA, video.public_id, {
+      1: PART_SIZE,
+      2: 6_000_000 - PART_SIZE,
+    });
+    await request(app.getHttpServer())
+      .post(`/videos/${video.public_id}/upload/completion`)
+      .set('Authorization', `Bearer ${tokenA}`)
+      .expect(202);
 
     const res = await requestParts([1]).expect(409);
 

@@ -98,3 +98,13 @@ export class UploadAlreadyCompletedException extends DomainException {
     super('UPLOAD_ALREADY_COMPLETED', 409, 'Upload was already completed');
   }
 }
+
+export class UploadIncompleteException extends DomainException {
+  constructor() {
+    super(
+      'UPLOAD_INCOMPLETE',
+      409,
+      'Uploaded parts are missing, out of sequence or have an unexpected size',
+    );
+  }
+}

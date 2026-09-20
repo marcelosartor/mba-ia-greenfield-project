@@ -1,6 +1,9 @@
+import { getQueueToken } from '@nestjs/bullmq';
 import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import type { S3Client } from '@aws-sdk/client-s3';
+import type { Queue } from 'bullmq';
 import { DataSource } from 'typeorm';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { VerificationToken } from '../auth/entities/verification-token.entity';
@@ -8,21 +11,32 @@ import { Channel } from '../channels/entities/channel.entity';
 import {
   StorageUnavailableException,
   UploadAlreadyCompletedException,
+  UploadIncompleteException,
   VideoAccessDeniedException,
   VideoNotFoundException,
+  VideoTooLargeException,
 } from '../common/exceptions/domain.exception';
+import redisConfig from '../config/redis.config';
 import storageConfig from '../config/storage.config';
 import videoConfig from '../config/video.config';
+import { QUEUE_NAMES } from '../queue/queue.constants';
+import { VideoProcessingPublisher } from '../queue/video-processing.publisher';
 import { StorageService } from '../storage/storage.service';
 import {
   cleanAllTables,
   createTestDataSource,
 } from '../test/create-test-data-source';
+import {
+  createStorageTestClient,
+  deleteStoredObject,
+} from '../test/storage-test-client';
 import { User } from '../users/entities/user.entity';
 import { Video } from './entities/video.entity';
 import { VideoStatus } from './video-status.enum';
 import { VideoUploadsService } from './video-uploads.service';
 import { VideosModule } from './videos.module';
+
+const PART_SIZE = 5_242_880;
 
 const ALL_ENTITIES = [User, Channel, RefreshToken, VerificationToken, Video];
 
@@ -30,6 +44,9 @@ describe('VideoUploadsService (integration)', () => {
   let dataSource: DataSource;
   let service: VideoUploadsService;
   let storage: StorageService;
+  let publisher: VideoProcessingPublisher;
+  let queue: Queue;
+  let cleanupClient: S3Client;
   let closeModule: () => Promise<void>;
   let user: User;
   let channel: Channel;
@@ -39,24 +56,38 @@ describe('VideoUploadsService (integration)', () => {
       imports: [
         ConfigModule.forRoot({
           isGlobal: true,
-          load: [storageConfig, videoConfig],
+          load: [redisConfig, storageConfig, videoConfig],
         }),
         TypeOrmModule.forRoot(createTestDataSource(ALL_ENTITIES).options),
         VideosModule,
       ],
-    }).compile();
+    })
+      // small parts so a multipart upload with real parts stays cheap
+      .overrideProvider(videoConfig.KEY)
+      .useValue({
+        partSizeBytes: PART_SIZE,
+        workerConcurrency: 1,
+        processingTimeoutMs: 1_800_000,
+      })
+      .compile();
 
     dataSource = module.get(DataSource);
     service = module.get(VideoUploadsService);
     storage = module.get(StorageService);
+    publisher = module.get(VideoProcessingPublisher);
+    queue = module.get<Queue>(getQueueToken(QUEUE_NAMES.VIDEO_PROCESSING));
+    cleanupClient = createStorageTestClient();
     closeModule = () => module.close();
   });
 
   afterAll(async () => {
+    await queue.obliterate({ force: true });
+    cleanupClient.destroy();
     await closeModule();
   });
 
   beforeEach(async () => {
+    await queue.obliterate({ force: true });
     await cleanAllTables(dataSource);
     user = await dataSource
       .getRepository(User)
@@ -75,6 +106,11 @@ describe('VideoUploadsService (integration)', () => {
       if (video.upload_id) {
         await storage.abortMultipartUpload(video.video_key, video.upload_id);
       }
+      await deleteStoredObject(
+        cleanupClient,
+        storage.videosBucket,
+        video.video_key,
+      );
     }
   });
 
@@ -87,8 +123,8 @@ describe('VideoUploadsService (integration)', () => {
 
     expect(result).toMatchObject({
       status: 'draft',
-      part_size_bytes: 67_108_864,
-      part_count: 3,
+      part_size_bytes: PART_SIZE,
+      part_count: 39,
     });
     const video = await dataSource
       .getRepository(Video)
@@ -234,5 +270,149 @@ describe('VideoUploadsService (integration)', () => {
     await expect(
       service.requestPartUrls(user.id, public_id, { part_numbers: [1] }),
     ).rejects.toBeInstanceOf(UploadAlreadyCompletedException);
+  });
+
+  describe('completeUpload', () => {
+    const uploadParts = async (
+      public_id: string,
+      sizes: Record<number, number>,
+    ): Promise<Video> => {
+      const numbers = Object.keys(sizes).map(Number);
+      const { parts } = await service.requestPartUrls(user.id, public_id, {
+        part_numbers: numbers,
+      });
+      for (const part of parts) {
+        const response = await fetch(part.url, {
+          method: 'PUT',
+          body: Buffer.alloc(sizes[part.part_number]),
+        });
+        expect(response.ok).toBe(true);
+      }
+      return dataSource.getRepository(Video).findOneByOrFail({ public_id });
+    };
+
+    const initiate = async (sizeBytes: number): Promise<string> =>
+      (
+        await service.initiate(user.id, {
+          filename: 'holiday.mp4',
+          content_type: 'video/mp4',
+          size_bytes: sizeBytes,
+        })
+      ).public_id;
+
+    it('should complete a real multipart upload and queue the processing job', async () => {
+      const publicId = await initiate(2 * PART_SIZE + 1_000);
+      const video = await uploadParts(publicId, {
+        1: PART_SIZE,
+        2: PART_SIZE,
+        3: 1_000,
+      });
+
+      const result = await service.completeUpload(user.id, publicId);
+
+      expect(result).toEqual({
+        public_id: publicId,
+        status: 'draft',
+        upload_completed: true,
+      });
+      const stored = await dataSource
+        .getRepository(Video)
+        .findOneByOrFail({ id: video.id });
+      expect(stored.upload_completed_at).toBeInstanceOf(Date);
+      expect(stored.upload_id).toBeNull();
+      expect(stored.status).toBe(VideoStatus.DRAFT);
+      const head = await storage.headObject(
+        storage.videosBucket,
+        video.video_key,
+      );
+      expect(head.contentLength).toBe(2 * PART_SIZE + 1_000);
+      const job = await queue.getJob(video.id);
+      expect(job?.data).toEqual({ videoId: video.id });
+      expect(job?.name).toBe('process-video');
+    });
+
+    it('should be idempotent when the client repeats the confirmation', async () => {
+      const publicId = await initiate(1_000);
+      const video = await uploadParts(publicId, { 1: 1_000 });
+
+      const first = await service.completeUpload(user.id, publicId);
+      const second = await service.completeUpload(user.id, publicId);
+
+      expect(second).toEqual(first);
+      expect(await queue.getJobCounts('waiting', 'delayed', 'active')).toEqual({
+        waiting: 1,
+        delayed: 0,
+        active: 0,
+      });
+      expect(await queue.getJob(video.id)).toBeDefined();
+    });
+
+    it('should refuse a missing intermediate part and keep the upload open', async () => {
+      const publicId = await initiate(2 * PART_SIZE + 1_000);
+      await uploadParts(publicId, { 1: PART_SIZE, 3: 1_000 });
+
+      await expect(
+        service.completeUpload(user.id, publicId),
+      ).rejects.toBeInstanceOf(UploadIncompleteException);
+
+      const stored = await dataSource
+        .getRepository(Video)
+        .findOneByOrFail({ public_id: publicId });
+      expect(stored.upload_completed_at).toBeNull();
+      expect(stored.upload_id).toBeTruthy();
+      expect(await queue.getJobCounts('waiting')).toEqual({ waiting: 0 });
+    });
+
+    it('should discard the draft and abort the multipart when the parts exceed 10 GiB', async () => {
+      const publicId = await initiate(1_000);
+      const video = await uploadParts(publicId, { 1: 1_000 });
+      jest
+        .spyOn(storage, 'listParts')
+        .mockResolvedValue([
+          { partNumber: 1, sizeBytes: 11 * 1024 ** 3, etag: '"x"' },
+        ]);
+      const abort = jest.spyOn(storage, 'abortMultipartUpload');
+
+      await expect(
+        service.completeUpload(user.id, publicId),
+      ).rejects.toBeInstanceOf(VideoTooLargeException);
+
+      expect(abort).toHaveBeenCalledWith(video.video_key, video.upload_id);
+      expect(await dataSource.getRepository(Video).count()).toBe(0);
+      expect(await queue.getJobCounts('waiting')).toEqual({ waiting: 0 });
+    });
+
+    it('should complete even when the job cannot be published', async () => {
+      const publicId = await initiate(1_000);
+      await uploadParts(publicId, { 1: 1_000 });
+      jest
+        .spyOn(publisher, 'publish')
+        .mockRejectedValue(new Error('redis down'));
+
+      const result = await service.completeUpload(user.id, publicId);
+
+      expect(result.upload_completed).toBe(true);
+      const stored = await dataSource
+        .getRepository(Video)
+        .findOneByOrFail({ public_id: publicId });
+      expect(stored.status).toBe(VideoStatus.DRAFT);
+      expect(stored.upload_completed_at).toBeInstanceOf(Date);
+    });
+
+    it('should complete the upload only once for two simultaneous confirmations', async () => {
+      const publicId = await initiate(1_000);
+      const video = await uploadParts(publicId, { 1: 1_000 });
+
+      const results = await Promise.all([
+        service.completeUpload(user.id, publicId),
+        service.completeUpload(user.id, publicId),
+      ]);
+
+      expect(results.every((result) => result.upload_completed)).toBe(true);
+      expect(await queue.getJobCounts('waiting')).toEqual({ waiting: 1 });
+      expect((await queue.getJob(video.id))?.data).toEqual({
+        videoId: video.id,
+      });
+    });
   });
 });
