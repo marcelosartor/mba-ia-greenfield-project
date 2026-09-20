@@ -2,18 +2,23 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   HttpCode,
   HttpStatus,
   Param,
   Post,
+  Res,
+  StreamableFile,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiHeader,
   ApiOperation,
   ApiResponse,
   ApiTags,
   getSchemaPath,
 } from '@nestjs/swagger';
+import type { Response } from 'express';
 import type { JwtPayload } from '../auth/auth.types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Public } from '../auth/decorators/public.decorator';
@@ -24,6 +29,7 @@ import { VideoResponseDto } from './dto/video-response.dto';
 import { UploadCompletionResponseDto } from './dto/upload-completion-response.dto';
 import { UploadPartsResponseDto } from './dto/upload-parts-response.dto';
 import { UploadSessionResponseDto } from './dto/upload-session-response.dto';
+import { VideoStreamingService } from './video-streaming.service';
 import { VideoUploadsService } from './video-uploads.service';
 import { VideosService } from './videos.service';
 import type { InitiatedUpload } from './videos.types';
@@ -34,6 +40,7 @@ export class VideosController {
   constructor(
     private readonly videoUploadsService: VideoUploadsService,
     private readonly videosService: VideosService,
+    private readonly videoStreamingService: VideoStreamingService,
   ) {}
 
   @Post()
@@ -262,5 +269,66 @@ export class VideosController {
     @Param('publicId') publicId: string,
   ): Promise<VideoResponseDto> {
     return this.videosService.getReadyVideo(publicId);
+  }
+
+  @Public()
+  @Get(':publicId/stream')
+  @ApiOperation({
+    summary: 'Stream a video',
+    description:
+      'Serves the video file from the object storage without loading it into memory. Supports a single-range `Range` header (206 Partial Content); any other `Range` value is ignored and the whole file is sent.',
+  })
+  @ApiHeader({
+    name: 'Range',
+    required: false,
+    description: 'A single byte range, e.g. `bytes=0-1023`',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'The whole video file',
+    content: {
+      'video/mp4': { schema: { type: 'string', format: 'binary' } },
+    },
+  })
+  @ApiResponse({
+    status: 206,
+    description: 'The requested byte range, with a `Content-Range` header',
+    content: {
+      'video/mp4': { schema: { type: 'string', format: 'binary' } },
+    },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Video not found (VIDEO_NOT_FOUND)',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'Video is draft, processing or in error (VIDEO_NOT_READY)',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 416,
+    description:
+      'Range not satisfiable (INVALID_RANGE); `Content-Range: bytes */{total}`',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 502,
+    description: 'Object storage unavailable (STORAGE_UNAVAILABLE)',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  async streamVideo(
+    @Param('publicId') publicId: string,
+    @Headers('range') range: string | undefined,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<StreamableFile> {
+    const video = await this.videoStreamingService.stream(publicId, range);
+    response.status(video.statusCode);
+    response.set(video.headers);
+    // Nest pipes the stream to the response but does not stop the source when
+    // the client goes away; without this the storage read would stay open.
+    response.once('close', () => video.body.destroy());
+    return new StreamableFile(video.body);
   }
 }

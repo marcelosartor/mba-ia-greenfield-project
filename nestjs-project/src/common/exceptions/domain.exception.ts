@@ -3,6 +3,8 @@ export abstract class DomainException extends Error {
     public readonly errorCode: string,
     public readonly httpStatus: number,
     message: string,
+    /** Extra response headers the error carries (e.g. `Content-Range`). */
+    public readonly headers?: Record<string, string>,
   ) {
     super(message);
     this.name = this.constructor.name;
@@ -112,5 +114,13 @@ export class UploadIncompleteException extends DomainException {
 export class VideoNotReadyException extends DomainException {
   constructor() {
     super('VIDEO_NOT_READY', 409, 'Video is not ready yet');
+  }
+}
+
+export class InvalidRangeException extends DomainException {
+  constructor(totalBytes: number) {
+    super('INVALID_RANGE', 416, 'Requested range is not satisfiable', {
+      'Content-Range': `bytes */${totalBytes}`,
+    });
   }
 }

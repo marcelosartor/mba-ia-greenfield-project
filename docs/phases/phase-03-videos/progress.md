@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 14/19 completed
+**SIs:** 15/19 completed
 
 ### SI-03.1 — Configurar dependências, namespaces de config e variáveis de ambiente de storage e fila
 - **Status:** completed
@@ -183,9 +183,19 @@
   - Um `public_id` de teste com 12 caracteres quebrou a primeira rodada da integração (a coluna é `varchar(11)`); corrigido para 11.
 
 ### SI-03.15 — Endpoint GET /videos/{public_id}/stream
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 46 passing novos (range.util.spec 24, video-streaming.service.spec 14, video-streaming.service.integration-spec 6 contra o MinIO real, +2 no `domain-exception.filter.spec`) + 11 no e2e `test/videos-stream.e2e-spec.ts` (do spec `videos-stream.plan.md`, 8 testes, mais três extras: busca no fim do arquivo, `Range` ignorado e abandono do cliente); suíte completa 418 passing (53 suítes), e2e 95 passing; `npx tsc --noEmit` exit 0; `npm run lint` 0 erros (23 warnings preexistentes); prettier sem problemas nos arquivos do SI
+- **Observations:**
+  - Os cinco critérios do plano passam: `Range: bytes=0-1023` → `206`, `Content-Range: bytes 0-1023/3145728`, `Content-Length: 1024` e os mesmos 1024 primeiros bytes do objeto; sem `Range` → `200` com `Accept-Ranges`, `Content-Length` e o mesmo SHA-256; `Range` além do fim → `416 INVALID_RANGE` com `Content-Range: bytes */3145728`; `draft`/`processing`/`error` → `409`, inexistente → `404`; 200 MiB servidos sem `Range` com SHA-256 igual e crescimento de `heapUsed` abaixo de 50 MiB.
+  - O `Content-Range` do 416 exigiu estender `DomainException` com `headers` opcionais (o `DomainExceptionFilter` os aplica antes de responder o envelope). Alternativa descartada: `try/catch` no controller, proibido pela regra dos controllers. `InvalidRangeException(totalBytes)` carrega `Content-Range: bytes */{total}`; dois testes novos no filtro.
+  - `parseRange` segue a RFC 9110: `start-end`, `start-` e `-sufixo`; vários intervalos, unidade diferente de `bytes`, sintaxe inválida e `start > end` são ignorados (resposta 200 completa); início além do fim, sufixo zero e qualquer intervalo sobre arquivo vazio são não satisfatórios; `end` maior que o arquivo é limitado ao último byte. O serviço converte intervalo aberto e sufixo em `bytes=início-fim` explícito antes de pedir ao storage e calcula sozinho `Content-Range` e `Content-Length` (não confia nos do storage).
+  - O corpo devolvido é o próprio `Readable` do storage dentro de um `StreamableFile`. O `ExpressAdapter` do Nest só faz `stream.pipe(response)` e não destrói a origem quando o cliente desiste; sem tratamento, uma leitura de até 10 GiB ficaria aberta no storage. O controller registra `response.once('close', () => video.body.destroy())`. Teste e2e novo (cliente HTTP que recebe o primeiro chunk e fecha a conexão) e **verificado por mutação**: com a linha comentada ele falha (30 s de espera) e com ela passa.
+  - `Cache-Control: no-cache` e `ETag` do objeto saem em todas as respostas de sucesso; `Content-Type` vem do objeto (`video/mp4` gravado no upload), com o do `HEAD` e `application/octet-stream` como reserva.
+  - A medida "heap não cresce" foi ajustada em duas rodadas: somar `arrayBuffers` ao `heapUsed` dava falso positivo (82 MB para 100 MiB) porque a memória externa de Buffers já consumidos só é liberada quando o GC roda; o spec pede `heapUsed`, e é o que os testes usam. Acrescentei ao teste de integração uma prova determinística de backpressure: com o consumidor parado depois do primeiro chunk, `readableLength` do stream fica abaixo de 4 MiB em um objeto de 100 MiB.
+  - O superagent corta respostas em 200 MB por padrão (`Maximum response size reached`); o helper de leitura em stream do e2e usa `.maxResponseSize(1 GiB)` e um parser próprio que só calcula o hash, sem acumular o corpo.
+  - Vídeo `ready` cujo objeto some do storage vira erro do S3 (`NotFound`, sem tratamento de domínio, resposta 500); situação anômala, fora do contrato do plano.
+  - `test/videos-stream.e2e-spec.ts` semeia objetos reais (3 MiB, 40 MiB e 200 MiB) e apaga todos no `afterEach`; o de 200 MiB leva ~1,5 s.
+  - Helpers novos em `src/test/stream-test-utils.ts` (`randomContent`, `sha256`, `digestStream`), reaproveitáveis no download do SI-03.16.
 
 ### SI-03.16 — Endpoint GET /videos/{public_id}/download
 - **Status:** pending
