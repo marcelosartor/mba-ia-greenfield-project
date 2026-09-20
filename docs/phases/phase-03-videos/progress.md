@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 11/19 completed
+**SIs:** 12/19 completed
 
 ### SI-03.1 — Configurar dependências, namespaces de config e variáveis de ambiente de storage e fila
 - **Status:** completed
@@ -146,9 +146,17 @@
   - Limpei dos buckets do MinIO local objetos órfãos de rodadas antigas do e2e e do meu teste de fumaça (o teste de fumaça era um script temporário, removido).
 
 ### SI-03.12 — Tratar falhas, retentativas, DLQ e idempotência no worker
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 23 passing novos (video.processor.spec 18, video.processor.failures.integration-spec 5, este com Postgres, Redis, MinIO e FFmpeg reais); `video.processor.*` estável em 3 execuções; suíte completa 342 passing (46 suítes), e2e 77 passing; `npx tsc --noEmit` exit 0; `npm run lint` 0 erros (23 warnings preexistentes); prettier sem problemas nos arquivos do SI
+- **Observations:**
+  - Os cinco cenários do plano passam sem ajuste: arquivo corrompido → `error`/`INVALID_MEDIA` com uma única tentativa (`attemptsMade = 1`) e nada na DLQ; falha transitória nas duas primeiras tentativas → `ready` na terceira (a sonda foi chamada 3 vezes); falha persistente → 3 tentativas, `error`/`PROCESSING_FAILED` e um job `dead-lettered-video` com `{ videoId, failedReason, attemptsMade: 3 }`; job repetido de vídeo `ready` → sem chamar a sonda, `thumbnail_key` e `updated_at` inalterados; redelivery de vídeo em `processing` → `ready` e um único objeto sob `{videoId}/` no bucket de thumbnails.
+  - `VideoProcessor.process` só captura `InvalidMediaError`: grava `error`/`INVALID_MEDIA` (transição `processing` → `error`) e lança `UnrecoverableError`. Todo o resto (mídia transitória, storage, rede, banco, inclusive falha ao iniciar) é relançado sem captura, senão o `attempts`/backoff do BullMQ não valeria. Isso é o oposto da regra de "logar e não relançar" das tarefas em segundo plano, aplicada só ao manipulador de evento.
+  - O manipulador `@OnWorkerEvent('failed')` roda depois de cada tentativa falha e só age quando a tentativa é a última (`attemptsMade >= opts.attempts`) e o erro não é `UnrecoverableError` (esse caso já foi resolvido em `process` e, como o plano define, não vai para a DLQ). Como um erro escapando de um manipulador de evento seria uma rejeição não tratada que derruba o worker, esse é o único lugar onde falhas são só registradas em log; ele atualiza o vídeo primeiro e publica na DLQ depois, e falha em qualquer dos dois não relança.
+  - A transição final de `PROCESSING_FAILED` aceita `processing` ou `draft` como origem: se o banco ficar fora do ar em todas as tentativas de `startProcessing`, o vídeo continua `draft` e ainda assim precisa terminar em `error`.
+  - `failedReason` e `error_message` passam por `redactUrls` e são cortados em 500 caracteres antes de ir ao banco e à DLQ (teste com uma URL pré-assinada). Os códigos ficam em `src/videos/video-error-codes.ts`.
+  - Os jobs da DLQ não usam `jobId` fixo (um mesmo vídeo pode morrer mais de uma vez ao longo do tempo sem que o segundo registro seja descartado) e não têm consumidor, como no plano; ficam em `waiting` para inspeção.
+  - Nos testes de integração os jobs são publicados direto na fila com a mesma política de produção (3 tentativas, backoff exponencial) mas base de 100 ms em vez de 5000 ms, para não somar ~15 s por teste; o `VideoProcessingPublisher` real continua coberto pelos testes dos SI-03.4 e SI-03.9.
+  - Pendência que este SI não resolve, para o SI-03.13: um job que falha definitivamente permanece no Redis por 7 dias (`removeOnFail`) com o mesmo `jobId` do vídeo, então uma nova publicação do mesmo `videoId` pelo sweeper seria descartada como duplicada enquanto esse job existir; o sweeper precisa remover o job antigo antes de republicar.
 
 ### SI-03.13 — Implementar o sweeper de uploads abandonados e a republicação de jobs
 - **Status:** pending

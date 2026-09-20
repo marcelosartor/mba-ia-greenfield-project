@@ -1,16 +1,30 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import {
+  InjectQueue,
+  OnWorkerEvent,
+  Processor,
+  WorkerHost,
+} from '@nestjs/bullmq';
 import { Inject, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import type { ConfigType } from '@nestjs/config';
-import type { Job } from 'bullmq';
+import { UnrecoverableError, type Job, type Queue } from 'bullmq';
 import type { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 import videoConfig from '../config/video.config';
-import { QUEUE_NAMES } from '../queue/queue.constants';
-import type { VideoProcessingJobData } from '../queue/queue.types';
+import { JOB_NAMES, QUEUE_NAMES } from '../queue/queue.constants';
+import type {
+  DeadLetteredVideoJobData,
+  VideoProcessingJobData,
+} from '../queue/queue.types';
 import { StorageService } from '../storage/storage.service';
 import type { Video } from '../videos/entities/video.entity';
+import {
+  MAX_ERROR_MESSAGE_LENGTH,
+  VIDEO_ERROR_CODES,
+} from '../videos/video-error-codes';
 import { VideoStatus } from '../videos/video-status.enum';
 import { VideosRepository } from '../videos/videos.repository';
+import { redactUrls } from './media/media-tool';
 import { MediaProbeService } from './media/media-probe.service';
+import { InvalidMediaError } from './media/media.errors';
 import type { MediaMetadata } from './media/media.types';
 import { ThumbnailService } from './media/thumbnail.service';
 
@@ -35,6 +49,8 @@ export class VideoProcessor
     private readonly storageService: StorageService,
     private readonly mediaProbeService: MediaProbeService,
     private readonly thumbnailService: ThumbnailService,
+    @InjectQueue(QUEUE_NAMES.VIDEO_PROCESSING_DLQ)
+    private readonly deadLetterQueue: Queue<DeadLetteredVideoJobData>,
     @Inject(videoConfig.KEY)
     private readonly config: ConfigType<typeof videoConfig>,
   ) {
@@ -47,6 +63,13 @@ export class VideoProcessor
     this.worker.concurrency = this.config.workerConcurrency;
   }
 
+  /**
+   * Any error thrown here makes BullMQ retry the job (`attempts` + backoff);
+   * that is what transient failures (storage, network, database) rely on, so
+   * they are deliberately not caught. Only an invalid file is handled: it ends
+   * the video in `error` and is raised as an `UnrecoverableError`, which skips
+   * the remaining attempts.
+   */
   async process(job: Job<VideoProcessingJobData>): Promise<void> {
     const { videoId } = job.data;
 
@@ -62,6 +85,93 @@ export class VideoProcessor
       return;
     }
 
+    try {
+      await this.processVideo(video);
+    } catch (error) {
+      if (error instanceof InvalidMediaError) {
+        await this.failVideo(
+          videoId,
+          [VideoStatus.PROCESSING],
+          VIDEO_ERROR_CODES.INVALID_MEDIA,
+          error.message,
+        );
+        throw new UnrecoverableError(error.message);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Runs after every failed attempt. Once the attempts are exhausted by
+   * transient failures, the job is copied to the dead-letter queue and the
+   * video ends in `error`. This is an event handler, not part of the request
+   * lifecycle: an exception escaping it would be an unhandled rejection that
+   * kills the worker, so failures here are logged instead of rethrown.
+   */
+  @OnWorkerEvent('failed')
+  async onFailed(
+    job: Job<VideoProcessingJobData> | undefined,
+    error: Error,
+  ): Promise<void> {
+    if (!job || !this.isExhausted(job, error)) {
+      return;
+    }
+    const { videoId } = job.data;
+    const failedReason = this.shortMessage(error.message);
+
+    try {
+      await this.failVideo(
+        videoId,
+        [VideoStatus.PROCESSING, VideoStatus.DRAFT],
+        VIDEO_ERROR_CODES.PROCESSING_FAILED,
+        failedReason,
+      );
+      await this.deadLetterQueue.add(JOB_NAMES.DEAD_LETTERED_VIDEO, {
+        videoId,
+        failedReason,
+        attemptsMade: job.attemptsMade,
+      });
+    } catch (handlerError) {
+      this.logger.error(
+        `Could not dead-letter video ${videoId}: ${String(handlerError)}`,
+      );
+    }
+  }
+
+  // An UnrecoverableError already ended the video in `process`; every other
+  // failure is final only when it consumed the last attempt.
+  private isExhausted(job: Job, error: Error): boolean {
+    return (
+      !(error instanceof UnrecoverableError) &&
+      job.attemptsMade >= (job.opts.attempts ?? 1)
+    );
+  }
+
+  private async failVideo(
+    videoId: string,
+    from: VideoStatus[],
+    errorCode: string,
+    message: string,
+  ): Promise<void> {
+    const changed = await this.videosRepository.transitionStatus(
+      videoId,
+      from,
+      VideoStatus.ERROR,
+      { error_code: errorCode, error_message: this.shortMessage(message) },
+    );
+    if (!changed) {
+      this.logger.warn(
+        `Video ${videoId} was no longer in ${from.join('/')}; error ${errorCode} not recorded`,
+      );
+    }
+  }
+
+  // Stored and logged: keeps it short and never lets a presigned URL through.
+  private shortMessage(message: string): string {
+    return redactUrls(message).slice(0, MAX_ERROR_MESSAGE_LENGTH);
+  }
+
+  private async processVideo(video: Video): Promise<void> {
     const sourceUrl = await this.storageService.presignGetObject(
       this.storageService.videosBucket,
       video.video_key,
@@ -93,7 +203,7 @@ export class VideoProcessor
     );
     if (!finished) {
       this.logger.warn(
-        `Video ${videoId} left processing while the job was running; result discarded`,
+        `Video ${video.id} left processing while the job was running; result discarded`,
       );
     }
   }
