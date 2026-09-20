@@ -5,6 +5,8 @@ import {
   ChannelNotFoundException,
   StorageUnavailableException,
   UnsupportedVideoFormatException,
+  VideoAccessDeniedException,
+  VideoNotFoundException,
   VideoTooLargeException,
 } from '../common/exceptions/domain.exception';
 import type videoConfig from '../config/video.config';
@@ -39,12 +41,14 @@ describe('VideoUploadsService', () => {
   let channelsService: { findByUserId: jest.Mock };
   let videosRepository: {
     createDraft: jest.Mock;
+    findByPublicId: jest.Mock;
     setUploadId: jest.Mock;
     deleteById: jest.Mock;
   };
   let storageService: {
     createMultipartUpload: jest.Mock;
     abortMultipartUpload: jest.Mock;
+    listParts: jest.Mock;
   };
   let service: VideoUploadsService;
 
@@ -52,12 +56,14 @@ describe('VideoUploadsService', () => {
     channelsService = { findByUserId: jest.fn().mockResolvedValue(channel) };
     videosRepository = {
       createDraft: jest.fn().mockResolvedValue(draft),
+      findByPublicId: jest.fn(),
       setUploadId: jest.fn().mockResolvedValue(undefined),
       deleteById: jest.fn().mockResolvedValue(undefined),
     };
     storageService = {
       createMultipartUpload: jest.fn().mockResolvedValue('upload-1'),
       abortMultipartUpload: jest.fn().mockResolvedValue(undefined),
+      listParts: jest.fn().mockResolvedValue([]),
     };
     service = new VideoUploadsService(
       channelsService as unknown as ChannelsService,
@@ -205,6 +211,94 @@ describe('VideoUploadsService', () => {
 
       await expect(service.initiate('user-1', validDto)).rejects.toBe(failure);
       expect(videosRepository.deleteById).toHaveBeenCalledWith('video-1');
+    });
+  });
+
+  describe('getUploadSession', () => {
+    const ownedVideo = {
+      ...draft,
+      channel_id: 'channel-1',
+      upload_id: 'upload-1',
+      upload_completed_at: null,
+    } as Video;
+
+    beforeEach(() => {
+      videosRepository.findByPublicId.mockResolvedValue(ownedVideo);
+    });
+
+    it('should list the parts already in the storage for the owner', async () => {
+      storageService.listParts.mockResolvedValue([
+        { partNumber: 1, sizeBytes: 5, etag: '"a"' },
+        { partNumber: 2, sizeBytes: 5, etag: '"b"' },
+      ]);
+
+      const session = await service.getUploadSession('user-1', 'abcdefghijk');
+
+      expect(storageService.listParts).toHaveBeenCalledWith(
+        ownedVideo.video_key,
+        'upload-1',
+      );
+      expect(session).toEqual({
+        public_id: 'abcdefghijk',
+        status: 'draft',
+        upload_completed: false,
+        part_size_bytes: 67_108_864,
+        uploaded_parts: [
+          { part_number: 1, size_bytes: 5 },
+          { part_number: 2, size_bytes: 5 },
+        ],
+      });
+    });
+
+    it('should not list parts once the upload is completed', async () => {
+      videosRepository.findByPublicId.mockResolvedValue({
+        ...ownedVideo,
+        status: VideoStatus.PROCESSING,
+        upload_completed_at: new Date(),
+      });
+
+      const session = await service.getUploadSession('user-1', 'abcdefghijk');
+
+      expect(session.upload_completed).toBe(true);
+      expect(session.uploaded_parts).toEqual([]);
+      expect(storageService.listParts).not.toHaveBeenCalled();
+    });
+
+    it('should throw VideoNotFoundException for an unknown public_id', async () => {
+      videosRepository.findByPublicId.mockResolvedValue(null);
+
+      await expect(
+        service.getUploadSession('user-1', 'aaaaaaaaaaa'),
+      ).rejects.toBeInstanceOf(VideoNotFoundException);
+    });
+
+    it('should deny a user whose channel does not own the video', async () => {
+      channelsService.findByUserId.mockResolvedValue({
+        id: 'channel-2',
+      } as Channel);
+
+      await expect(
+        service.getUploadSession('user-2', 'abcdefghijk'),
+      ).rejects.toBeInstanceOf(VideoAccessDeniedException);
+      expect(storageService.listParts).not.toHaveBeenCalled();
+    });
+
+    it('should deny a user without a channel', async () => {
+      channelsService.findByUserId.mockResolvedValue(null);
+
+      await expect(
+        service.getUploadSession('user-3', 'abcdefghijk'),
+      ).rejects.toBeInstanceOf(VideoAccessDeniedException);
+    });
+
+    it('should propagate a storage failure', async () => {
+      storageService.listParts.mockRejectedValue(
+        new StorageUnavailableException(),
+      );
+
+      await expect(
+        service.getUploadSession('user-1', 'abcdefghijk'),
+      ).rejects.toBeInstanceOf(StorageUnavailableException);
     });
   });
 });

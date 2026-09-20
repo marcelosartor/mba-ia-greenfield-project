@@ -1,4 +1,12 @@
-import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Post,
+} from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -10,6 +18,7 @@ import type { JwtPayload } from '../auth/auth.types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { ApiErrorEnvelope } from '../common/openapi/api-error-envelope.dto';
 import { CreateVideoDto } from './dto/create-video.dto';
+import { UploadSessionResponseDto } from './dto/upload-session-response.dto';
 import { VideoUploadsService } from './video-uploads.service';
 import type { InitiatedUpload } from './videos.types';
 
@@ -74,5 +83,43 @@ export class VideosController {
     @Body() dto: CreateVideoDto,
   ): Promise<InitiatedUpload> {
     return this.videoUploadsService.initiate(user.sub, dto);
+  }
+
+  @Get(':publicId/upload')
+  @ApiOperation({
+    summary: 'Get the state of an upload',
+    description:
+      'Lists the parts already stored so an interrupted upload can be resumed. Only the owner of the video can call it; once the upload is completed the list of parts is empty.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Upload session',
+    type: UploadSessionResponseDto,
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Missing or invalid access token',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'The video belongs to another channel (VIDEO_ACCESS_DENIED)',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Video not found (VIDEO_NOT_FOUND)',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 502,
+    description: 'Object storage unavailable (STORAGE_UNAVAILABLE)',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  async getUploadSession(
+    @CurrentUser() user: JwtPayload,
+    @Param('publicId') publicId: string,
+  ): Promise<UploadSessionResponseDto> {
+    return this.videoUploadsService.getUploadSession(user.sub, publicId);
   }
 }

@@ -5,7 +5,11 @@ import { DataSource } from 'typeorm';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { VerificationToken } from '../auth/entities/verification-token.entity';
 import { Channel } from '../channels/entities/channel.entity';
-import { StorageUnavailableException } from '../common/exceptions/domain.exception';
+import {
+  StorageUnavailableException,
+  VideoAccessDeniedException,
+  VideoNotFoundException,
+} from '../common/exceptions/domain.exception';
 import storageConfig from '../config/storage.config';
 import videoConfig from '../config/video.config';
 import { StorageService } from '../storage/storage.service';
@@ -114,5 +118,76 @@ describe('VideoUploadsService (integration)', () => {
     ).rejects.toBeInstanceOf(StorageUnavailableException);
 
     expect(await dataSource.getRepository(Video).count()).toBe(0);
+  });
+
+  it('should list the parts really uploaded to the storage', async () => {
+    const { public_id } = await service.initiate(user.id, {
+      filename: 'holiday.mp4',
+      content_type: 'video/mp4',
+      size_bytes: 200_000_000,
+    });
+    const video = await dataSource
+      .getRepository(Video)
+      .findOneByOrFail({ public_id });
+    for (const [partNumber, size] of [
+      [1, 1024],
+      [2, 2048],
+    ]) {
+      const url = await storage.presignUploadPart(
+        video.video_key,
+        video.upload_id as string,
+        partNumber,
+      );
+      const response = await fetch(url, {
+        method: 'PUT',
+        body: Buffer.alloc(size),
+      });
+      expect(response.ok).toBe(true);
+    }
+
+    const session = await service.getUploadSession(user.id, public_id);
+
+    expect(session.upload_completed).toBe(false);
+    expect(session.uploaded_parts).toEqual([
+      { part_number: 1, size_bytes: 1024 },
+      { part_number: 2, size_bytes: 2048 },
+    ]);
+  });
+
+  it('should report a completed upload without listing parts', async () => {
+    const { public_id } = await service.initiate(user.id, {
+      filename: 'holiday.mp4',
+      content_type: 'video/mp4',
+      size_bytes: 1000,
+    });
+    await dataSource
+      .getRepository(Video)
+      .update({ public_id }, { upload_completed_at: new Date() });
+
+    const session = await service.getUploadSession(user.id, public_id);
+
+    expect(session.upload_completed).toBe(true);
+    expect(session.uploaded_parts).toEqual([]);
+  });
+
+  it('should deny another user and report an unknown video', async () => {
+    const { public_id } = await service.initiate(user.id, {
+      filename: 'holiday.mp4',
+      content_type: 'video/mp4',
+      size_bytes: 1000,
+    });
+    const other = await dataSource
+      .getRepository(User)
+      .save({ email: 'other@example.com', password: 'hashed' });
+    await dataSource
+      .getRepository(Channel)
+      .save({ name: 'Other', nickname: 'other', user_id: other.id });
+
+    await expect(
+      service.getUploadSession(other.id, public_id),
+    ).rejects.toBeInstanceOf(VideoAccessDeniedException);
+    await expect(
+      service.getUploadSession(user.id, 'aaaaaaaaaaa'),
+    ).rejects.toBeInstanceOf(VideoNotFoundException);
   });
 });

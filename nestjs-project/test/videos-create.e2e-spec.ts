@@ -13,6 +13,7 @@ import {
   createE2eApp,
   registerConfirmAndLogin,
 } from './helpers/e2e-app';
+import { abortOpenUploads } from './helpers/video-e2e';
 
 interface CreateVideoBody {
   public_id: string;
@@ -44,24 +45,21 @@ describe('POST /videos (e2e)', () => {
   });
 
   beforeEach(async () => {
-    await abortOpenUploads();
+    await abortOpenUploads(
+      storage,
+      await dataSource.getRepository(Video).find(),
+    );
     await cleanAllTables(dataSource);
     app.get<ThrottlerStorageService>(ThrottlerStorage).storage.clear();
     token = await registerConfirmAndLogin(app, 'owner-a@example.com');
   });
 
   afterEach(async () => {
-    await abortOpenUploads();
+    await abortOpenUploads(
+      storage,
+      await dataSource.getRepository(Video).find(),
+    );
   });
-
-  async function abortOpenUploads(): Promise<void> {
-    const videos = await dataSource.getRepository(Video).find();
-    for (const video of videos) {
-      if (video.upload_id) {
-        await storage.abortMultipartUpload(video.video_key, video.upload_id);
-      }
-    }
-  }
 
   const postVideo = (body: object, bearer: string | null = token) => {
     const req = request(app.getHttpServer()).post('/videos');

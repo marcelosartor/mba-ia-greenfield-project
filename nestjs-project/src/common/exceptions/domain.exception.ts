@@ -76,3 +76,19 @@ export class UnsupportedVideoFormatException extends DomainException {
     );
   }
 }
+
+export class VideoNotFoundException extends DomainException {
+  constructor() {
+    super('VIDEO_NOT_FOUND', 404, 'Video not found');
+  }
+}
+
+export class VideoAccessDeniedException extends DomainException {
+  constructor() {
+    super(
+      'VIDEO_ACCESS_DENIED',
+      403,
+      'Only the owner of the video can manage its upload',
+    );
+  }
+}

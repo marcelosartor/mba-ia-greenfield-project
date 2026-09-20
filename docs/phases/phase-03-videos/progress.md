@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 6/19 completed
+**SIs:** 7/19 completed
 
 ### SI-03.1 — Configurar dependências, namespaces de config e variáveis de ambiente de storage e fila
 - **Status:** completed
@@ -79,9 +79,16 @@
   - Os testes de integração e e2e abortam os multiparts que abriram (no `afterEach`), para não acumular uploads incompletos no MinIO.
 
 ### SI-03.7 — Endpoint GET /videos/{public_id}/upload
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 14 passing novos (video-uploads.service.spec +6, video-uploads.service.integration-spec +3, test/videos-upload-session.e2e-spec 5 [do spec `videos-upload-session.plan.md`]); suíte completa 227 passing (36 suítes), e2e 64 passing; `npx tsc --noEmit` exit 0; `npm run lint` 0 erros (23 warnings preexistentes); prettier sem problemas nos arquivos do SI
+- **Observations:**
+  - Os cenários 1.1 e 1.5 do spec usam `POST /videos/{public_id}/upload/parts` e `/completion`, que só existem nos SI-03.8 e SI-03.9. Para o e2e passar agora, as partes são enviadas com URLs pré-assinadas geradas pelo `StorageService` (PUT real no MinIO) e o marcador `upload_completed_at` é gravado direto no banco. **Pendente:** trocar esses dois cenários pelos endpoints reais quando o SI-03.9 existir (já anotado no comentário do teste).
+  - `assertOwner` é async e recebe `(userId, video)`: o dono é quem tem canal com `id = video.channel_id`; usuário sem canal também recebe 403. É o método que os SI-03.8 e SI-03.9 reutilizam.
+  - Vídeo inexistente responde 404 antes da checagem de dono, como no plano (`VIDEO_NOT_FOUND` vs `VIDEO_ACCESS_DENIED` revelam se o `public_id` existe; é o que o Error Catalog define).
+  - `part_size_bytes` da resposta vem da configuração atual (`VIDEO_UPLOAD_PART_SIZE_BYTES`), pois a tabela `videos` não guarda o tamanho da parte; se a variável mudar com um upload em andamento, o valor devolvido muda. O modelo de dados do plano não prevê a coluna, então mantive assim.
+  - Para `upload_completed_at` preenchido ou vídeo sem `upload_id`, `uploaded_parts` é vazio e o storage nem é consultado.
+  - O DTO de resposta usa `@ApiProperty` explícito (o `openapi:export` roda via ts-node, sem o plugin do Nest CLI); os DTOs de entrada seguem o padrão do projeto, sem decoradores de swagger.
+  - `test/helpers/video-e2e.ts` (novo) tem `putPart` e `abortOpenUploads`; este ignora `NoSuchUpload` (upload já concluído ou abortado) e é usado também por `videos-create.e2e-spec.ts`, que perdeu sua cópia privada.
 
 ### SI-03.8 — Endpoint POST /videos/{public_id}/upload/parts
 - **Status:** pending

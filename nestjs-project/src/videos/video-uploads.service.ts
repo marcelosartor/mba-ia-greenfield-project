@@ -4,11 +4,15 @@ import { ChannelsService } from '../channels/channels.service';
 import {
   ChannelNotFoundException,
   UnsupportedVideoFormatException,
+  VideoAccessDeniedException,
+  VideoNotFoundException,
   VideoTooLargeException,
 } from '../common/exceptions/domain.exception';
 import videoConfig from '../config/video.config';
 import { StorageService } from '../storage/storage.service';
 import { CreateVideoDto } from './dto/create-video.dto';
+import type { UploadSessionResponseDto } from './dto/upload-session-response.dto';
+import type { Video } from './entities/video.entity';
 import {
   MAX_VIDEO_SIZE_BYTES,
   MAX_VIDEO_TITLE_LENGTH,
@@ -81,6 +85,42 @@ export class VideoUploadsService {
       part_size_bytes: this.config.partSizeBytes,
       part_count: Math.ceil(dto.size_bytes / this.config.partSizeBytes),
     };
+  }
+
+  async getUploadSession(
+    userId: string,
+    publicId: string,
+  ): Promise<UploadSessionResponseDto> {
+    const video = await this.videosRepository.findByPublicId(publicId);
+    if (!video) {
+      throw new VideoNotFoundException();
+    }
+    await this.assertOwner(userId, video);
+
+    const uploadCompleted = video.upload_completed_at !== null;
+    const parts =
+      uploadCompleted || !video.upload_id
+        ? []
+        : await this.storageService.listParts(video.video_key, video.upload_id);
+
+    return {
+      public_id: video.public_id,
+      status: video.status,
+      upload_completed: uploadCompleted,
+      part_size_bytes: this.config.partSizeBytes,
+      uploaded_parts: parts.map((part) => ({
+        part_number: part.partNumber,
+        size_bytes: part.sizeBytes,
+      })),
+    };
+  }
+
+  /** Owner = the user whose channel owns the video (channels.user_id = sub). */
+  async assertOwner(userId: string, video: Video): Promise<void> {
+    const channel = await this.channelsService.findByUserId(userId);
+    if (!channel || channel.id !== video.channel_id) {
+      throw new VideoAccessDeniedException();
+    }
   }
 
   private resolveExtension(dto: CreateVideoDto): string {
