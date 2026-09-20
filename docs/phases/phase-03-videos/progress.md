@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 1/19 completed
+**SIs:** 2/19 completed
 
 ### SI-03.1 — Configurar dependências, namespaces de config e variáveis de ambiente de storage e fila
 - **Status:** completed
@@ -14,9 +14,18 @@
   - `npm install` reportou 40 vulnerabilidades no audit do conjunto de dependências (preexistentes na árvore do projeto); tratar `npm audit` é fora do escopo deste SI.
 
 ### SI-03.2 — Infra: subir MinIO, buckets e Redis no Compose e instalar FFmpeg na imagem dev
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** no tests (Infra); critérios verificados por comando contra a stack no ar: `docker compose ps` (minio e redis saudáveis, `minio-init` Exited (0), nestjs-api em execução), `ffprobe -version`, buckets `videos` e `thumbnails` listados por cliente S3 em `http://minio:9000`, `redis-cli config get maxmemory-policy` = `noeviction`, `grep` de `localhost`/`127.0.0.1` sem ocorrências
+- **Observations:**
+  - Imagem do storage: `quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z` (confirmada com `minio --version`). A imagem do `mc` foi fixada por digest, não por tag: `quay.io/minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727` (release `RELEASE.2025-08-13T08-35-41Z`).
+  - Evidência para o TD-10 (imagem removida do Docker Hub, presente no quay.io): `docker manifest inspect minio/minio:RELEASE.2025-09-07T16-13-09Z` falhou e `quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z` e `quay.io/minio/mc:latest` resolveram, em 2026-09-20.
+  - FFmpeg vem do `apt` do Debian 12 (bookworm): `ffmpeg`/`ffprobe` 5.1.9-0+deb12u1. Isso confirma a afirmação do TD-04/TD-05 que não veio da doc consultada.
+  - `redis:7` resolveu para o Redis 7.4.11, com `--appendonly yes --maxmemory-policy noeviction`.
+  - O healthcheck do MinIO usa `mc ready local` (a imagem já traz o `mc`), o que evita escrever `localhost` no `compose.yaml`.
+  - Nenhuma porta de `minio` ou `redis` é publicada no host: o tráfego é só pela rede do Compose. O console do MinIO (porta 9001) não é publicado.
+  - O `minio-init` é idempotente (`mc mb --ignore-existing`); ao rodar de novo ele imprime "Bucket created successfully" mesmo com o bucket já existente, mas termina com código 0 sem recriar nada.
+  - O `compose.yaml` interpola `STORAGE_ACCESS_KEY_ID` e `STORAGE_SECRET_ACCESS_KEY` do `.env` para as credenciais raiz do MinIO; sem elas no `.env` o `minio` não sobe.
+  - O serviço `video-worker` fica para o SI-03.11.
 
 ### SI-03.3 — Implementar StorageModule com StorageService
 - **Status:** pending
