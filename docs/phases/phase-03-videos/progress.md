@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 16/19 completed
+**SIs:** 17/19 completed
 
 ### SI-03.1 — Configurar dependências, namespaces de config e variáveis de ambiente de storage e fila
 - **Status:** completed
@@ -208,9 +208,18 @@
   - Não repeti o teste de abandono do cliente para o download: ele usa o mesmo `pipeStorageBody` já coberto no stream.
 
 ### SI-03.17 — Publicar o contrato OpenAPI e os exemplos de requisição dos vídeos
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 20 passing novos em `src/openapi-export.integration-spec.ts` (29 no total no arquivo); suíte completa 467 passing (55 suítes), e2e 101 passing; `npx tsc --noEmit` exit 0; `npm run lint` 0 erros (23 warnings preexistentes); prettier sem problemas nos arquivos do SI; `npm run openapi:export` duas vezes seguidas sem diferença no `openapi.json` (conferido com `cmp`)
+- **Observations:**
+  - **Problema encontrado ao cumprir a ação 1 (conferir que os DTOs alimentam o plugin):** o `npm run openapi:export` rodava por `ts-node`, sem o plugin do `@nestjs/swagger`, e os DTOs de entrada saíam com `properties: {}` (o `RegisterDto` da Fase 02 já saía vazio no `HEAD`). Isso deixava vazios os corpos de `POST /videos` e `.../upload/parts` no contrato que o frontend consome. Correção: o script agora é `nest build -p tsconfig.openapi.json && node dist-openapi/openapi-export.js`, que passa pelo build do Nest CLI e aplica o plugin; os schemas saem com campos, `required`, limites e descrições (`RegisterDto`, `LoginDto` e os demais também foram corrigidos de graça).
+  - O build do export usa um `outDir` próprio (`tsconfig.openapi.json` → `dist-openapi/`, ignorado pelo git e excluído do `tsconfig.json`) para não apagar o `dist/` que o serviço `video-worker` usa (`deleteOutDir` está ativo no `nest-cli.json`).
+  - O parâmetro de rota `:publicId` foi renomeado para `:public_id`, para que o OpenAPI mostre `/videos/{public_id}` como o plano, o contrato e o enunciado pedem (snake_case no fio); um `ApiPublicIdParam` documenta o parâmetro (descrição e exemplo) nos seis endpoints que o têm. Nenhuma URL muda para o cliente.
+  - Documento gerado: os sete caminhos sob a tag `videos`; `security: access-token` só nos quatro protegidos (os três públicos não anunciam autenticação); erros documentados com `ApiErrorEnvelope`; o stream declara `200`, `206`, `416` e o cabeçalho `Range` opcional. Os testes conferem tudo isso, mais a idempotência da exportação (duas exportações idênticas) e que o `openapi.json` versionado lista os sete caminhos.
+  - Sob o Jest (`ts-jest`) não há plugin, então os schemas dos DTOs de entrada saem vazios na exportação de teste; por isso a checagem dos campos dos corpos (`CreateVideoDto`, `RequestUploadPartsDto`) é feita sobre o `openapi.json` versionado, que é gerado com o plugin.
+  - `size_bytes` e `part_numbers` saem com `type: number` (o plugin não mapeia `@IsInt` para `integer`); não acrescentei `@ApiProperty` explícito para não divergir do padrão dos DTOs de entrada do projeto.
+  - `api.http` ganhou os itens 10 a 17 com o fluxo completo (criar, estado, URLs, `PUT` da parte, conclusão, metadados, stream com `Range`, download), variáveis capturadas dos responses (`publicId`, `partUrl`), a receita para gerar um `sample.mp4` no contêiner e a ressalva de que o `PUT` na URL pré-assinada só alcança o host `minio` de dentro da rede do Docker (TD-09), com o `curl` equivalente no contêiner; `/sample.mp4` entrou no `.gitignore`.
+  - **Não executei o `api.http` contra a API no ar:** o `CLAUDE.md` do projeto proíbe subir o servidor sem pedido explícito. As chamadas espelham as que os e2e dos SI-03.6 a 03.16 já exercitam, mas a sintaxe das variáveis de resposta do REST Client (`{{createVideo.response.body.$.public_id}}`, `{{partUrls.response.body.$.parts[0].url}}`) não foi rodada. Também não abri a interface do Swagger para ver o agrupamento; o teste confere a tag no documento.
+  - A documentação do processo de exportação (`nest build` em vez de `ts-node`) deve entrar nos `CLAUDE.md` no SI-03.19.
 
 ### SI-03.18 — Provar o upload de 10GB sem travar a API (script e evidência manual)
 - **Status:** pending

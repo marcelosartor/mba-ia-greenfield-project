@@ -1,5 +1,9 @@
 # compiled output
 /dist
+/dist-openapi
+
+# exemplo de vídeo do api.http
+/sample.mp4
 /node_modules
 /build
 

@@ -10,6 +10,10 @@
 @accessToken = {{login.response.body.$.access_token}}
 @refreshToken = {{login.response.body.$.refresh_token}}
 
+# Vídeos: identificador e URL da parte, capturados dos responses do fluxo de upload
+@publicId = {{createVideo.response.body.$.public_id}}
+@partUrl = {{partUrls.response.body.$.parts[0].url}}
+
 # Tokens obtidos via e-mail — preencher manualmente após consultar http://localhost:8025
 @confirmationToken = <token do e-mail de confirmacao>
 @resetToken = <token do e-mail de reset>
@@ -118,3 +122,71 @@ Content-Type: {{contentType}}
   "token": "{{resetToken}}",
   "new_password": "new-password123"
 }
+
+
+###
+# ─────────────────────────────────────────────
+# VÍDEOS — UPLOAD, CONSULTA, STREAMING E DOWNLOAD
+# ─────────────────────────────────────────────
+# Requer login (item 4) e o worker no ar (`docker compose up -d`).
+# Arquivo de exemplo (dentro do contêiner, na pasta do projeto):
+#   docker compose exec nestjs-api ffmpeg -f lavfi -i testsrc=duration=5:size=320x240:rate=25 -c:v libx264 -pix_fmt yuv420p sample.mp4
+# O tamanho em bytes vai em size_bytes:  stat -c %s sample.mp4
+# Os bytes do vídeo NÃO passam pela API: o cliente envia cada parte direto ao storage.
+
+### 10. Iniciar o upload — cria o rascunho e abre o multipart (só o dono do canal)
+# @name createVideo
+POST {{baseUrl}}/videos
+Authorization: Bearer {{accessToken}}
+Content-Type: {{contentType}}
+
+{
+  "filename": "sample.mp4",
+  "content_type": "video/mp4",
+  "size_bytes": 60000
+}
+
+
+### 11. Estado do upload — partes já enviadas (para retomar após falha)
+GET {{baseUrl}}/videos/{{publicId}}/upload
+Authorization: Bearer {{accessToken}}
+
+
+### 12. Pedir as URLs pré-assinadas das partes (1 a 100 por chamada)
+# @name partUrls
+POST {{baseUrl}}/videos/{{publicId}}/upload/parts
+Authorization: Bearer {{accessToken}}
+Content-Type: {{contentType}}
+
+{
+  "part_numbers": [1]
+}
+
+
+### 13. Enviar a parte 1 direto ao storage, na URL retornada (sem Authorization)
+# A URL usa o host `minio` da rede do Docker: este PUT só funciona de dentro dela.
+# Da máquina host, use o contêiner:
+#   docker compose exec nestjs-api curl -X PUT --upload-file sample.mp4 "<url da parte 1>"
+PUT {{partUrl}}
+Content-Type: video/mp4
+
+< ./sample.mp4
+
+
+### 14. Confirmar a conclusão — a API valida as partes, completa o multipart e enfileira o processamento
+# Idempotente: repetir devolve 202 de novo, sem criar outro job
+POST {{baseUrl}}/videos/{{publicId}}/upload/completion
+Authorization: Bearer {{accessToken}}
+
+
+### 15. Metadados do vídeo (público) — 409 VIDEO_NOT_READY até o worker terminar
+GET {{baseUrl}}/videos/{{publicId}}
+
+
+### 16. Streaming (público) — primeiro quilobyte por Range: responde 206 com Content-Range
+GET {{baseUrl}}/videos/{{publicId}}/stream
+Range: bytes=0-1023
+
+
+### 17. Download (público) — arquivo completo como anexo
+GET {{baseUrl}}/videos/{{publicId}}/download

@@ -13,6 +13,7 @@ import {
 import {
   ApiBearerAuth,
   ApiHeader,
+  ApiParam,
   ApiOperation,
   ApiResponse,
   ApiTags,
@@ -34,6 +35,13 @@ import { VideoStreamingService } from './video-streaming.service';
 import { VideoUploadsService } from './video-uploads.service';
 import { VideosService } from './videos.service';
 import type { InitiatedUpload } from './videos.types';
+
+const ApiPublicIdParam = () =>
+  ApiParam({
+    name: 'public_id',
+    description: 'Public identifier of the video (11 URL-safe characters)',
+    example: 'dQw4w9WgXcQ',
+  });
 
 @ApiTags('videos')
 @Controller('videos')
@@ -102,7 +110,8 @@ export class VideosController {
     return this.videoUploadsService.initiate(user.sub, dto);
   }
 
-  @Get(':publicId/upload')
+  @Get(':public_id/upload')
+  @ApiPublicIdParam()
   @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Get the state of an upload',
@@ -136,12 +145,13 @@ export class VideosController {
   })
   async getUploadSession(
     @CurrentUser() user: JwtPayload,
-    @Param('publicId') publicId: string,
+    @Param('public_id') publicId: string,
   ): Promise<UploadSessionResponseDto> {
     return this.videoUploadsService.getUploadSession(user.sub, publicId);
   }
 
-  @Post(':publicId/upload/parts')
+  @Post(':public_id/upload/parts')
+  @ApiPublicIdParam()
   @ApiBearerAuth('access-token')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
@@ -186,13 +196,14 @@ export class VideosController {
   })
   async requestPartUrls(
     @CurrentUser() user: JwtPayload,
-    @Param('publicId') publicId: string,
+    @Param('public_id') publicId: string,
     @Body() dto: RequestUploadPartsDto,
   ): Promise<UploadPartsResponseDto> {
     return this.videoUploadsService.requestPartUrls(user.sub, publicId, dto);
   }
 
-  @Post(':publicId/upload/completion')
+  @Post(':public_id/upload/completion')
+  @ApiPublicIdParam()
   @ApiBearerAuth('access-token')
   @HttpCode(HttpStatus.ACCEPTED)
   @ApiOperation({
@@ -239,13 +250,14 @@ export class VideosController {
   })
   async completeUpload(
     @CurrentUser() user: JwtPayload,
-    @Param('publicId') publicId: string,
+    @Param('public_id') publicId: string,
   ): Promise<UploadCompletionResponseDto> {
     return this.videoUploadsService.completeUpload(user.sub, publicId);
   }
 
   @Public()
-  @Get(':publicId')
+  @Get(':public_id')
+  @ApiPublicIdParam()
   @ApiOperation({
     summary: 'Get a video',
     description:
@@ -267,13 +279,14 @@ export class VideosController {
     schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
   })
   async getVideo(
-    @Param('publicId') publicId: string,
+    @Param('public_id') publicId: string,
   ): Promise<VideoResponseDto> {
     return this.videosService.getReadyVideo(publicId);
   }
 
   @Public()
-  @Get(':publicId/stream')
+  @Get(':public_id/stream')
+  @ApiPublicIdParam()
   @ApiOperation({
     summary: 'Stream a video',
     description:
@@ -320,7 +333,7 @@ export class VideosController {
     schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
   })
   async streamVideo(
-    @Param('publicId') publicId: string,
+    @Param('public_id') publicId: string,
     @Headers('range') range: string | undefined,
     @Res({ passthrough: true }) response: Response,
   ): Promise<StreamableFile> {
@@ -330,7 +343,8 @@ export class VideosController {
   }
 
   @Public()
-  @Get(':publicId/download')
+  @Get(':public_id/download')
+  @ApiPublicIdParam()
   @ApiOperation({
     summary: 'Download a video',
     description:
@@ -360,7 +374,7 @@ export class VideosController {
     schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
   })
   async downloadVideo(
-    @Param('publicId') publicId: string,
+    @Param('public_id') publicId: string,
     @Res({ passthrough: true }) response: Response,
   ): Promise<StreamableFile> {
     const video = await this.videoStreamingService.download(publicId);
