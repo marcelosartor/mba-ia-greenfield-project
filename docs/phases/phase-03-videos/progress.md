@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 7/19 completed
+**SIs:** 8/19 completed
 
 ### SI-03.1 — Configurar dependências, namespaces de config e variáveis de ambiente de storage e fila
 - **Status:** completed
@@ -91,9 +91,15 @@
   - `test/helpers/video-e2e.ts` (novo) tem `putPart` e `abortOpenUploads`; este ignora `NoSuchUpload` (upload já concluído ou abortado) e é usado também por `videos-create.e2e-spec.ts`, que perdeu sua cópia privada.
 
 ### SI-03.8 — Endpoint POST /videos/{public_id}/upload/parts
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 12 passing novos (video-uploads.service.spec +5, video-uploads.service.integration-spec +2, test/videos-upload-parts.e2e-spec 6 [do spec `videos-upload-parts.plan.md`]); suíte completa 234 passing (36 suítes), e2e 70 passing; `npx tsc --noEmit` exit 0; `npm run lint` 0 erros (23 warnings preexistentes); prettier sem problemas nos arquivos do SI
+- **Observations:**
+  - O cenário 1.3 do spec (rejeitar depois da conclusão) usa `POST .../upload/completion`, que só existe no SI-03.9; como no SI-03.7, o marcador `upload_completed_at` é gravado direto no banco. **Pendente:** trocar pelo endpoint real no SI-03.9 (junto com os cenários 1.1 e 1.5 do SI-03.7).
+  - `part_numbers` é validado por `class-validator` (`ArrayMinSize(1)`, `ArrayMaxSize(100)`, `ArrayUnique`, `IsInt`, `Min(1)`, `Max(10000)` em cada item); os limites estão em `video-upload.constants.ts`. O e2e também cobre repetição, 0, 10001 e item que não é inteiro.
+  - A extração do vídeo com verificação de dono virou `loadOwnedVideo` no `VideoUploadsService`, usado por `getUploadSession` e `requestPartUrls`; os SI-03.9 e seguintes de sessão de upload devem reutilizá-lo.
+  - Um vídeo com `upload_completed_at` nulo mas sem `upload_id` (estado inconsistente, que o SI-03.6 não produz) lança um `Error` comum (500), não uma exceção de domínio.
+  - As URLs saem com o host `minio` do Compose (o teste confere `hostname === 'minio'`). Isso é a decisão do TD-09: sem cliente de browser na Fase 03, e a prova de 10 GiB roda dentro da rede do Docker; `STORAGE_PUBLIC_ENDPOINT` segue configurado mas sem uso, para a fase do frontend.
+  - O `PUT` direto do teste vai ao MinIO sem cabeçalho `Authorization` e é aceito, o que confirma que os bytes não passam pela API.
 
 ### SI-03.9 — Endpoint POST /videos/{public_id}/upload/completion
 - **Status:** pending

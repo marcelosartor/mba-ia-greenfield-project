@@ -18,6 +18,8 @@ import type { JwtPayload } from '../auth/auth.types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { ApiErrorEnvelope } from '../common/openapi/api-error-envelope.dto';
 import { CreateVideoDto } from './dto/create-video.dto';
+import { RequestUploadPartsDto } from './dto/request-upload-parts.dto';
+import { UploadPartsResponseDto } from './dto/upload-parts-response.dto';
 import { UploadSessionResponseDto } from './dto/upload-session-response.dto';
 import { VideoUploadsService } from './video-uploads.service';
 import type { InitiatedUpload } from './videos.types';
@@ -121,5 +123,55 @@ export class VideosController {
     @Param('publicId') publicId: string,
   ): Promise<UploadSessionResponseDto> {
     return this.videoUploadsService.getUploadSession(user.sub, publicId);
+  }
+
+  @Post(':publicId/upload/parts')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Get presigned URLs for upload parts',
+    description:
+      'Issues presigned UploadPart URLs (valid for one hour) so the client sends each part straight to the object storage, without the bytes going through the API. Only the owner can call it, and only while the upload is not completed.',
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Presigned URLs',
+    type: UploadPartsResponseDto,
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Validation failed',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Missing or invalid access token',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'The video belongs to another channel (VIDEO_ACCESS_DENIED)',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Video not found (VIDEO_NOT_FOUND)',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'Upload already completed (UPLOAD_ALREADY_COMPLETED)',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 502,
+    description: 'Object storage unavailable (STORAGE_UNAVAILABLE)',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  async requestPartUrls(
+    @CurrentUser() user: JwtPayload,
+    @Param('publicId') publicId: string,
+    @Body() dto: RequestUploadPartsDto,
+  ): Promise<UploadPartsResponseDto> {
+    return this.videoUploadsService.requestPartUrls(user.sub, publicId, dto);
   }
 }

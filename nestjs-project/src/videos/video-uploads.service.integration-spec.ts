@@ -7,6 +7,7 @@ import { VerificationToken } from '../auth/entities/verification-token.entity';
 import { Channel } from '../channels/entities/channel.entity';
 import {
   StorageUnavailableException,
+  UploadAlreadyCompletedException,
   VideoAccessDeniedException,
   VideoNotFoundException,
 } from '../common/exceptions/domain.exception';
@@ -189,5 +190,49 @@ describe('VideoUploadsService (integration)', () => {
     await expect(
       service.getUploadSession(user.id, 'aaaaaaaaaaa'),
     ).rejects.toBeInstanceOf(VideoNotFoundException);
+  });
+
+  it('should issue URLs that accept a real part upload', async () => {
+    const { public_id } = await service.initiate(user.id, {
+      filename: 'holiday.mp4',
+      content_type: 'video/mp4',
+      size_bytes: 200_000_000,
+    });
+
+    const { parts, expires_in } = await service.requestPartUrls(
+      user.id,
+      public_id,
+      { part_numbers: [1, 3] },
+    );
+
+    expect(expires_in).toBe(3600);
+    expect(parts.map((part) => part.part_number)).toEqual([1, 3]);
+    for (const part of parts) {
+      expect(new URL(part.url).hostname).toBe('minio');
+      const response = await fetch(part.url, {
+        method: 'PUT',
+        body: Buffer.alloc(512),
+      });
+      expect(response.ok).toBe(true);
+    }
+    const session = await service.getUploadSession(user.id, public_id);
+    expect(session.uploaded_parts.map((part) => part.part_number)).toEqual([
+      1, 3,
+    ]);
+  });
+
+  it('should refuse new part URLs after the upload was completed', async () => {
+    const { public_id } = await service.initiate(user.id, {
+      filename: 'holiday.mp4',
+      content_type: 'video/mp4',
+      size_bytes: 1000,
+    });
+    await dataSource
+      .getRepository(Video)
+      .update({ public_id }, { upload_completed_at: new Date() });
+
+    await expect(
+      service.requestPartUrls(user.id, public_id, { part_numbers: [1] }),
+    ).rejects.toBeInstanceOf(UploadAlreadyCompletedException);
   });
 });

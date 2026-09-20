@@ -5,6 +5,7 @@ import {
   ChannelNotFoundException,
   StorageUnavailableException,
   UnsupportedVideoFormatException,
+  UploadAlreadyCompletedException,
   VideoAccessDeniedException,
   VideoNotFoundException,
   VideoTooLargeException,
@@ -49,6 +50,7 @@ describe('VideoUploadsService', () => {
     createMultipartUpload: jest.Mock;
     abortMultipartUpload: jest.Mock;
     listParts: jest.Mock;
+    presignUploadPart: jest.Mock;
   };
   let service: VideoUploadsService;
 
@@ -64,6 +66,11 @@ describe('VideoUploadsService', () => {
       createMultipartUpload: jest.fn().mockResolvedValue('upload-1'),
       abortMultipartUpload: jest.fn().mockResolvedValue(undefined),
       listParts: jest.fn().mockResolvedValue([]),
+      presignUploadPart: jest
+        .fn()
+        .mockImplementation((_key: string, _id: string, n: number) =>
+          Promise.resolve(`https://minio/part-${n}`),
+        ),
     };
     service = new VideoUploadsService(
       channelsService as unknown as ChannelsService,
@@ -298,6 +305,86 @@ describe('VideoUploadsService', () => {
 
       await expect(
         service.getUploadSession('user-1', 'abcdefghijk'),
+      ).rejects.toBeInstanceOf(StorageUnavailableException);
+    });
+  });
+
+  describe('requestPartUrls', () => {
+    const ownedVideo = {
+      ...draft,
+      channel_id: 'channel-1',
+      upload_id: 'upload-1',
+      upload_completed_at: null,
+    } as Video;
+
+    beforeEach(() => {
+      videosRepository.findByPublicId.mockResolvedValue(ownedVideo);
+    });
+
+    it('should presign each requested part for one hour', async () => {
+      const result = await service.requestPartUrls('user-1', 'abcdefghijk', {
+        part_numbers: [1, 2],
+      });
+
+      expect(storageService.presignUploadPart).toHaveBeenCalledWith(
+        ownedVideo.video_key,
+        'upload-1',
+        1,
+        3600,
+      );
+      expect(storageService.presignUploadPart).toHaveBeenCalledWith(
+        ownedVideo.video_key,
+        'upload-1',
+        2,
+        3600,
+      );
+      expect(result).toEqual({
+        parts: [
+          { part_number: 1, url: 'https://minio/part-1' },
+          { part_number: 2, url: 'https://minio/part-2' },
+        ],
+        expires_in: 3600,
+      });
+    });
+
+    it('should refuse once the upload is completed', async () => {
+      videosRepository.findByPublicId.mockResolvedValue({
+        ...ownedVideo,
+        upload_completed_at: new Date(),
+      });
+
+      await expect(
+        service.requestPartUrls('user-1', 'abcdefghijk', { part_numbers: [1] }),
+      ).rejects.toBeInstanceOf(UploadAlreadyCompletedException);
+      expect(storageService.presignUploadPart).not.toHaveBeenCalled();
+    });
+
+    it('should deny a user who is not the owner', async () => {
+      channelsService.findByUserId.mockResolvedValue({
+        id: 'channel-2',
+      } as Channel);
+
+      await expect(
+        service.requestPartUrls('user-2', 'abcdefghijk', { part_numbers: [1] }),
+      ).rejects.toBeInstanceOf(VideoAccessDeniedException);
+      expect(storageService.presignUploadPart).not.toHaveBeenCalled();
+    });
+
+    it('should throw VideoNotFoundException for an unknown public_id', async () => {
+      videosRepository.findByPublicId.mockResolvedValue(null);
+
+      await expect(
+        service.requestPartUrls('user-1', 'aaaaaaaaaaa', { part_numbers: [1] }),
+      ).rejects.toBeInstanceOf(VideoNotFoundException);
+    });
+
+    it('should propagate a storage failure', async () => {
+      storageService.presignUploadPart.mockRejectedValue(
+        new StorageUnavailableException(),
+      );
+
+      await expect(
+        service.requestPartUrls('user-1', 'abcdefghijk', { part_numbers: [1] }),
       ).rejects.toBeInstanceOf(StorageUnavailableException);
     });
   });

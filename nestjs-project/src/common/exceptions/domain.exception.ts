@@ -92,3 +92,9 @@ export class VideoAccessDeniedException extends DomainException {
     );
   }
 }
+
+export class UploadAlreadyCompletedException extends DomainException {
+  constructor() {
+    super('UPLOAD_ALREADY_COMPLETED', 409, 'Upload was already completed');
+  }
+}

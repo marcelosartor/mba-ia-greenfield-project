@@ -4,6 +4,7 @@ import { ChannelsService } from '../channels/channels.service';
 import {
   ChannelNotFoundException,
   UnsupportedVideoFormatException,
+  UploadAlreadyCompletedException,
   VideoAccessDeniedException,
   VideoNotFoundException,
   VideoTooLargeException,
@@ -11,11 +12,14 @@ import {
 import videoConfig from '../config/video.config';
 import { StorageService } from '../storage/storage.service';
 import { CreateVideoDto } from './dto/create-video.dto';
+import type { RequestUploadPartsDto } from './dto/request-upload-parts.dto';
+import type { UploadPartsResponseDto } from './dto/upload-parts-response.dto';
 import type { UploadSessionResponseDto } from './dto/upload-session-response.dto';
 import type { Video } from './entities/video.entity';
 import {
   MAX_VIDEO_SIZE_BYTES,
   MAX_VIDEO_TITLE_LENGTH,
+  UPLOAD_URL_EXPIRATION_SECONDS,
   VIDEO_FORMATS,
 } from './video-upload.constants';
 import { VideosRepository } from './videos.repository';
@@ -91,11 +95,7 @@ export class VideoUploadsService {
     userId: string,
     publicId: string,
   ): Promise<UploadSessionResponseDto> {
-    const video = await this.videosRepository.findByPublicId(publicId);
-    if (!video) {
-      throw new VideoNotFoundException();
-    }
-    await this.assertOwner(userId, video);
+    const video = await this.loadOwnedVideo(userId, publicId);
 
     const uploadCompleted = video.upload_completed_at !== null;
     const parts =
@@ -115,12 +115,53 @@ export class VideoUploadsService {
     };
   }
 
+  async requestPartUrls(
+    userId: string,
+    publicId: string,
+    dto: RequestUploadPartsDto,
+  ): Promise<UploadPartsResponseDto> {
+    const video = await this.loadOwnedVideo(userId, publicId);
+    if (video.upload_completed_at !== null) {
+      throw new UploadAlreadyCompletedException();
+    }
+    const uploadId = video.upload_id;
+    if (!uploadId) {
+      throw new Error(`Video ${video.id} has no open multipart upload`);
+    }
+
+    const parts = await Promise.all(
+      dto.part_numbers.map(async (partNumber) => ({
+        part_number: partNumber,
+        url: await this.storageService.presignUploadPart(
+          video.video_key,
+          uploadId,
+          partNumber,
+          UPLOAD_URL_EXPIRATION_SECONDS,
+        ),
+      })),
+    );
+
+    return { parts, expires_in: UPLOAD_URL_EXPIRATION_SECONDS };
+  }
+
   /** Owner = the user whose channel owns the video (channels.user_id = sub). */
   async assertOwner(userId: string, video: Video): Promise<void> {
     const channel = await this.channelsService.findByUserId(userId);
     if (!channel || channel.id !== video.channel_id) {
       throw new VideoAccessDeniedException();
     }
+  }
+
+  private async loadOwnedVideo(
+    userId: string,
+    publicId: string,
+  ): Promise<Video> {
+    const video = await this.videosRepository.findByPublicId(publicId);
+    if (!video) {
+      throw new VideoNotFoundException();
+    }
+    await this.assertOwner(userId, video);
+    return video;
   }
 
   private resolveExtension(dto: CreateVideoDto): string {
