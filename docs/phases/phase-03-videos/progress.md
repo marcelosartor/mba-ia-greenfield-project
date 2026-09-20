@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 2/19 completed
+**SIs:** 3/19 completed
 
 ### SI-03.1 — Configurar dependências, namespaces de config e variáveis de ambiente de storage e fila
 - **Status:** completed
@@ -28,9 +28,16 @@
   - O serviço `video-worker` fica para o SI-03.11.
 
 ### SI-03.3 — Implementar StorageModule com StorageService
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 12 passing (storage.service.spec 7, storage.module.spec 1, storage.service.integration-spec 4, esta contra o MinIO real do Compose); `npx tsc --noEmit` exit 0; eslint e prettier de `src/storage` sem problemas
+- **Observations:**
+  - Um teste falhou na primeira rodada (1 de 3 tentativas de correção usada): dentro do Jest o erro de DNS do Node vem de outro realm, o SDK o embrulha em `Error: AWS SDK error wrapper for Error: getaddrinfo EAI_AGAIN …` e perde o `code`. O mapeamento para `StorageUnavailableException` passou a olhar também a mensagem (`getaddrinfo`, `ECONNREFUSED`, etc.), e há um teste unitário para esse embrulho.
+  - Só falhas de comunicação (erro de rede, timeout e resposta 5xx) viram `STORAGE_UNAVAILABLE` (502). Respostas 4xx do storage (`NoSuchUpload`, `NotFound`, `InvalidRange`, …) sobem intactas como `S3ServiceException`; os SIs que consomem o `StorageService` (03.6 a 03.9, 03.15) decidem o que fazer com elas.
+  - `listParts` de um multipart abortado lança `NoSuchUpload` (404, não mapeado); `headObject` de objeto inexistente lança `NotFound`.
+  - Os métodos de multipart usam sempre o bucket `videos`; `presignGetObject`, `putObject`, `headObject` e `getObjectRange` recebem o bucket como parâmetro (o `StorageService` expõe `videosBucket` e `thumbnailsBucket`).
+  - A validação de `Range` (416) não fica no `StorageService`: `getObjectRange` repassa o intervalo ao storage, e o SI-03.15 confere o tamanho com `headObject` antes.
+  - Os testes de integração gravam sob `test-storage/<uuid>/` nos buckets reais e apagam os objetos no `afterAll`; o multipart abortado não deixa objeto.
+  - `ListPartsCommand`, `CompleteMultipartUploadCommand` e `AbortMultipartUploadCommand`, que o context7 não tinha devolvido, foram validados pelos tipos do SDK (`tsc`) e pelo teste de integração contra o MinIO real.
 
 ### SI-03.4 — Implementar QueueModule com as filas BullMQ
 - **Status:** pending
