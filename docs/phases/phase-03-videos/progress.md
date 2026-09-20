@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 9/19 completed
+**SIs:** 10/19 completed
 
 ### SI-03.1 — Configurar dependências, namespaces de config e variáveis de ambiente de storage e fila
 - **Status:** completed
@@ -115,9 +115,20 @@
   - Nesta rodada um `prettier --write src` meu reformatou por engano os templates `.hbs` de e-mail; revertidos com `git checkout` antes do commit (esses dois arquivos já falham no `prettier --check` desde antes, fora do escopo).
 
 ### SI-03.10 — Implementar MediaProbeService e ThumbnailService com ffprobe e ffmpeg
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 45 passing (media-probe.service.integration-spec 10, thumbnail.service.integration-spec 6, media-probe.mapper.spec 10, media-tool.spec 11, thumbnail.service.spec 7, media.module.spec 1), ffprobe/ffmpeg reais contra o MinIO real; suíte completa 306 passing (42 suítes), e2e 77 passing; `npx tsc --noEmit` exit 0; `npm run lint` 0 erros (23 warnings preexistentes); prettier sem problemas nos arquivos do SI
+- **Observations:**
+  - Só `child_process.execFile` (sem shell e sem biblioteca nova): FFmpeg 5.1.9 da imagem dev, com `libx264` e `aac` disponíveis para gerar os arquivos de teste. Não houve consulta ao context7 porque não há biblioteca de terceiros neste SI.
+  - Classificação de falhas em `media-tool.ts`: timeout, abort e sinal de morte viram `TransientMediaError`; se o `stderr` menciona leitura remota (`Server returned`, conexão recusada/resetada, DNS, `Input/output error`) também é transitório; qualquer outro `stderr` (`Invalid data found`, `moov atom not found`, sem trilha de vídeo) é `InvalidMediaError`. Binário ausente vira `Error` comum (retentável pelo processor). `MediaError` tem a flag `retryable` para o processor do SI-03.11/03.12 decidir entre `UnrecoverableError` e nova tentativa.
+  - As mensagens de erro passam por `redactUrls`: a URL pré-assinada carrega a assinatura na query string e as mensagens vão para `videos.error_message` e para o log, então `http(s)://…` vira `<url>` (teste garante que `X-Amz-Signature` não aparece).
+  - Ambas as ferramentas recebem `-protocol_whitelist http,https,tcp,tls,crypto`; um `file:///etc/passwd` é recusado (teste). O plano não pediu isso; escolha minha para que a origem só possa ser HTTP(S).
+  - Streams com `disposition.attached_pic = 1` (capa de MP3/M4A) não contam como trilha de vídeo, então áudio com capa é `InvalidMediaError`. Sem `duration` no formato, cai para a duração da trilha de vídeo; se nenhuma existir, `duration_seconds` é `null` (a coluna aceita) e o thumbnail usa o instante 0.
+  - `metadata` (JSONB) guarda o `format` e os `streams` reduzidos a campos técnicos; as `tags` do arquivo (título, autor, localização, etc.) ficam de fora de propósito.
+  - Thumbnail: `-ss` antes do `-i` (busca por Range, sem baixar o arquivo), `scale=640:-1` para preservar a proporção, arquivo temporário em `os.tmpdir()` sempre removido (`finally`; testado em sucesso e em falha). O teste do instante usa um vídeo preto por 0,5 s seguido de branco: em 10 s o frame de 1 s é branco (luma > 200) e sem duração (instante 0) é preto (luma < 50).
+  - O critério "sem baixar o arquivo inteiro para o disco do worker" é garantido por construção (só a URL é passada ao ffprobe) e o teste confere que nada novo aparece em `os.tmpdir()` ao sondar um MP4 com o `moov` no fim (`moov` depois de `mdat`, conferido nos bytes). Não medi os bytes trafegados; a medição de tráfego da API fica para a prova do SI-03.18.
+  - O timeout usa `videoConfig.processingTimeoutMs` (padrão 30 min); o teste cria o serviço com 1 ms para provocar o timeout. Ambos os métodos aceitam um `AbortSignal` opcional para o processor cancelar.
+  - Fixtures: `src/test/media-fixtures.ts` (`generateMp4`, `generateBlackThenWhiteMp4`, `readJpegSize`, `averageLuma`), reutilizável nos testes do processor (SI-03.11 e 03.12).
+  - O `MediaModule` só depende do `ConfigModule` global (para `videoConfig`); os serviços recebem a URL pronta, então ele não importa o `StorageModule`.
 
 ### SI-03.11 — Criar o worker e o VideoProcessor (caminho feliz)
 - **Status:** pending
