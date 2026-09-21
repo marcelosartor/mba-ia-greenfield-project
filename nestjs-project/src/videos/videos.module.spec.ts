@@ -1,0 +1,34 @@
+import { ConfigModule } from '@nestjs/config';
+import { Test } from '@nestjs/testing';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { RefreshToken } from '../auth/entities/refresh-token.entity';
+import { VerificationToken } from '../auth/entities/verification-token.entity';
+import { Channel } from '../channels/entities/channel.entity';
+import redisConfig from '../config/redis.config';
+import storageConfig from '../config/storage.config';
+import videoConfig from '../config/video.config';
+import { createTestDataSource } from '../test/create-test-data-source';
+import { User } from '../users/entities/user.entity';
+import { Video } from './entities/video.entity';
+import { VideosModule } from './videos.module';
+import { VideosRepository } from './videos.repository';
+
+const ALL_ENTITIES = [User, Channel, RefreshToken, VerificationToken, Video];
+
+describe('VideosModule', () => {
+  it('should compile and expose VideosRepository', async () => {
+    const module = await Test.createTestingModule({
+      imports: [
+        ConfigModule.forRoot({
+          isGlobal: true,
+          load: [redisConfig, storageConfig, videoConfig],
+        }),
+        TypeOrmModule.forRoot(createTestDataSource(ALL_ENTITIES).options),
+        VideosModule,
+      ],
+    }).compile();
+
+    expect(module.get(VideosRepository)).toBeInstanceOf(VideosRepository);
+    await module.close();
+  }, 30000);
+});

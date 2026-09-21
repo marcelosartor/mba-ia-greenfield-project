@@ -7,25 +7,26 @@ C4Container
     Container_Boundary(c1, "StreamTube") {
         Container(frontend, "Frontend", "Next.js", "Platform interface")
         Container(api, "API", "Nest.js", "Business rules and authentication")
-        Container(worker, "Video Worker", "FFmpeg", "Processes videos in background")
+        Container(worker, "Video Worker", "Nest.js + FFmpeg", "Extracts metadata, generates thumbnails and sweeps abandoned uploads")
         ContainerDb(db, "Database", "PostgreSQL", "Users, channels, videos, comments, likes")
         ContainerDb(storage, "Object Storage", "S3 or MinIO", "Video files and thumbnails")
-        ContainerQueue(queue, "Message Queue", "TBD", "Enqueues video processing jobs")
+        ContainerQueue(queue, "Message Queue", "BullMQ on Redis", "Video processing jobs, dead-letter and maintenance queues")
     }
 
     System_Ext(email, "Email Service", "Account confirmation and password recovery")
 
     Rel(anonUser, frontend, "Uses", "HTTPS")
     Rel(authUser, frontend, "Uses", "HTTPS")
-    Rel(frontend, api, "Calls", "REST")
-    Rel(frontend, storage, "Streams", "HTTPS")
+    Rel(frontend, api, "Calls, and watches videos through the streaming endpoint", "REST")
+    Rel(frontend, storage, "Sends video parts (presigned URLs)", "HTTPS")
 
     Rel(api, db, "Reads/Writes")
-    Rel(api, storage, "Uploads")
+    Rel(api, storage, "Starts and completes multipart uploads, streams and downloads videos")
     Rel(api, queue, "Publishes job")
     Rel(api, email, "Sends email", "SMTP")
 
     Rel(queue, worker, "Delivers job")
+    Rel(worker, queue, "Dead-letters exhausted jobs, republishes lost ones")
     Rel(worker, storage, "Reads/Saves")
     Rel(worker, db, "Updates")
 
@@ -48,6 +49,7 @@ C4Container
     UpdateRelStyle(api, queue, $textColor="#B0BEC5", $lineColor="#B0BEC5", $offsetX="40")
     UpdateRelStyle(api, email, $textColor="#B0BEC5", $lineColor="#B0BEC5")
     UpdateRelStyle(queue, worker, $textColor="#B0BEC5", $lineColor="#B0BEC5", $offsetX="40")
+    UpdateRelStyle(worker, queue, $textColor="#B0BEC5", $lineColor="#B0BEC5", $offsetX="-40")
     UpdateRelStyle(worker, storage, $textColor="#B0BEC5", $lineColor="#B0BEC5", $offsetX="40", $offsetY="10")
     UpdateRelStyle(worker, db, $textColor="#B0BEC5", $lineColor="#B0BEC5", $offsetX="40")
 
