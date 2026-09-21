@@ -940,29 +940,29 @@ A árvore mostra cada SI sob um único pai; as dependências adicionais (mais de
 
 ## Deliverables
 
-- [ ] SI-03.1 — Configurar dependências, namespaces de config e variáveis de ambiente de storage e fila
-- [ ] SI-03.2 — Infra: subir MinIO, buckets e Redis no Compose e instalar FFmpeg na imagem dev
-- [ ] SI-03.3 — Implementar StorageModule com StorageService
-- [ ] SI-03.4 — Implementar QueueModule com as filas BullMQ
-- [ ] SI-03.5 — Criar migration, entidade Video e repositório
-- [ ] SI-03.6 — Endpoint POST /videos
-- [ ] SI-03.7 — Endpoint GET /videos/{public_id}/upload
-- [ ] SI-03.8 — Endpoint POST /videos/{public_id}/upload/parts
-- [ ] SI-03.9 — Endpoint POST /videos/{public_id}/upload/completion
-- [ ] SI-03.10 — Implementar MediaProbeService e ThumbnailService com ffprobe e ffmpeg
-- [ ] SI-03.11 — Criar o worker e o VideoProcessor (caminho feliz)
-- [ ] SI-03.12 — Tratar falhas, retentativas, DLQ e idempotência no worker
-- [ ] SI-03.13 — Implementar o sweeper de uploads abandonados e a republicação de jobs
-- [ ] SI-03.14 — Endpoint GET /videos/{public_id}
-- [ ] SI-03.15 — Endpoint GET /videos/{public_id}/stream
-- [ ] SI-03.16 — Endpoint GET /videos/{public_id}/download
-- [ ] SI-03.17 — Publicar o contrato OpenAPI e os exemplos de requisição dos vídeos
-- [ ] SI-03.18 — Provar o upload de 10GB sem travar a API (script e evidência manual)
-- [ ] SI-03.19 — Atualizar CLAUDE.md e o diagrama de arquitetura e fechar a Definition of Done
+- [x] SI-03.1 — Configurar dependências, namespaces de config e variáveis de ambiente de storage e fila
+- [x] SI-03.2 — Infra: subir MinIO, buckets e Redis no Compose e instalar FFmpeg na imagem dev
+- [x] SI-03.3 — Implementar StorageModule com StorageService
+- [x] SI-03.4 — Implementar QueueModule com as filas BullMQ
+- [x] SI-03.5 — Criar migration, entidade Video e repositório
+- [x] SI-03.6 — Endpoint POST /videos
+- [x] SI-03.7 — Endpoint GET /videos/{public_id}/upload
+- [x] SI-03.8 — Endpoint POST /videos/{public_id}/upload/parts
+- [x] SI-03.9 — Endpoint POST /videos/{public_id}/upload/completion
+- [x] SI-03.10 — Implementar MediaProbeService e ThumbnailService com ffprobe e ffmpeg
+- [x] SI-03.11 — Criar o worker e o VideoProcessor (caminho feliz)
+- [x] SI-03.12 — Tratar falhas, retentativas, DLQ e idempotência no worker
+- [x] SI-03.13 — Implementar o sweeper de uploads abandonados e a republicação de jobs
+- [x] SI-03.14 — Endpoint GET /videos/{public_id}
+- [x] SI-03.15 — Endpoint GET /videos/{public_id}/stream
+- [x] SI-03.16 — Endpoint GET /videos/{public_id}/download
+- [x] SI-03.17 — Publicar o contrato OpenAPI e os exemplos de requisição dos vídeos
+- [x] SI-03.18 — Provar o upload de 10GB sem travar a API (script e evidência manual)
+- [x] SI-03.19 — Atualizar CLAUDE.md e o diagrama de arquitetura e fechar a Definition of Done
 
 **Full test suites:**
 
-- [ ] Backend tests pass (`cd nestjs-project && docker compose exec nestjs-api npm test -- --runInBand`)
-- [ ] E2E tests pass (`cd nestjs-project && docker compose exec nestjs-api npm run test:e2e`)
-- [ ] Type/compilation checks pass (`cd nestjs-project && docker compose exec nestjs-api npx tsc --noEmit`)
-- [ ] Lint passes (`cd nestjs-project && docker compose exec nestjs-api npm run lint`)
+- [x] Backend tests pass (`cd nestjs-project && docker compose exec nestjs-api npm test -- --runInBand`)
+- [x] E2E tests pass (`cd nestjs-project && docker compose exec nestjs-api npm run test:e2e`)
+- [x] Type/compilation checks pass (`cd nestjs-project && docker compose exec nestjs-api npx tsc --noEmit`)
+- [x] Lint passes (`cd nestjs-project && docker compose exec nestjs-api npm run lint`)

@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
-**Status:** in_progress
-**SIs:** 18/19 completed
+**Status:** completed
+**SIs:** 19/19 completed
 
 ### SI-03.1 — Configurar dependências, namespaces de config e variáveis de ambiente de storage e fila
 - **Status:** completed
@@ -243,6 +243,18 @@
   - Na limpeza, o MinIO manteve 11 GB em `/data/.minio.sys/tmp/.trash` (a lixeira em que ele guarda objetos apagados até a coleta em segundo plano) mesmo com os buckets vazios; apaguei a lixeira à mão e o volume voltou a 184 KB.
 
 ### SI-03.19 — Atualizar CLAUDE.md e o diagrama de arquitetura e fechar a Definition of Done
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** no tests (documentação e fechamento); Definition of Done executada dentro do contêiner em 2026-09-20, saídas abaixo
+- **Definition of Done (saídas):**
+  - `docker compose exec nestjs-api npm test -- --runInBand` → **exit 0**: `Test Suites: 55 passed, 55 total`, `Tests: 467 passed, 467 total`, `Snapshots: 0 total`, `Time: 18.11 s`.
+  - `docker compose exec nestjs-api npm run test:e2e` → **exit 0**: `Test Suites: 10 passed, 10 total`, `Tests: 101 passed, 101 total`, `Time: 19.408 s`.
+  - `docker compose exec nestjs-api npx tsc --noEmit` → **exit 0**, sem saída.
+  - `docker compose exec nestjs-api npm run lint` → **exit 0**: `✖ 23 problems (0 errors, 23 warnings)`; os 23 warnings são `no-unsafe-argument` nos specs de autenticação da Fase 02 (`auth.service.spec.ts` e `auth.service.integration-spec.ts`), anteriores a esta fase e fora do escopo.
+  - Git: a branch `feature/phase-03-videos` parte do topo atual da `dev` (`git merge-base HEAD dev` = `dev`), tem 23 commits à frente da `dev` e a `main` não contém nenhum commit da fase (`git log main --grep="SI-03"` → 0; `git merge-base --is-ancestor HEAD main` → não).
+- **Observations:**
+  - `CLAUDE.md` da raiz: estrutura do monorepo (um pacote com dois processos, API e worker), bloco de arquitetura sem o "TBD" da fila (BullMQ sobre Redis, MinIO, worker no mesmo pacote) e uma seção nova "Video Upload and Processing" com o fluxo de upload multipart pré-assinado, o processamento e o desfecho dos status, a leitura pública por stream e download, o `public_id`, o host do Compose nas URLs pré-assinadas (e o que isso implica para o frontend), a imagem do MinIO fixada no `quay.io` só para desenvolvimento e testes, e as duas dependências que a pesquisa não havia previsto (`@nestjs/bullmq` fixado em `^11` por a 12 ser ESM-only, e `ioredis` como cliente obrigatório do BullMQ). Isso corrige a afirmação da Fase de pesquisa de que o BullMQ trazia o `ioredis` sozinho (registrada nas observações do SI-03.4).
+  - `nestjs-project/CLAUDE.md`: regra de inicialização ajustada (o `video-worker` é infraestrutura e sobe com o `up`; a regra de só subir o servidor da API com pedido explícito continua, com a ressalva de que provas manuais definidas por uma tarefa contam como pedido e a API deve ser parada depois), verificações de prontidão de Redis (`redis-cli ping`), MinIO (`mc ready local` e o `minio-init` com `Exited (0)`) e worker ao lado do `pg_isready`, lista completa de serviços do Compose, comandos novos (`start:worker`, `start:worker:dev`, `openapi:export` via Nest CLI, `test:integration`, e o `test:e2e` que agora já usa `--runInBand`), o `jest-setup-env.js` e o `QUEUE_PREFIX` nos ajustes do Jest, a arquitetura (módulos `videos`, `storage`, `queue` e `worker`, os módulos compartilhados entre API e worker, a tabela dos sete endpoints, a correspondência `draft`/`processing`/`ready`/`error` com rascunho/processando/pronto/erro e os cuidados ao mexer nesses módulos) e onde estão as variáveis novas do `.env.example`.
+  - `docs/diagrams/software-arch.mermaid`: fila `BullMQ on Redis` no lugar de "TBD", worker como `Nest.js + FFmpeg`, o frontend enviando as partes direto ao storage por URLs pré-assinadas e assistindo aos vídeos pelo endpoint de streaming da API, a API iniciando/completando o multipart e servindo stream e download, e o worker devolvendo à fila (DLQ e republicação). Não tenho como renderizar o Mermaid neste ambiente; mantive a mesma sintaxe C4 do arquivo original e conferi o diff, mas o desenho renderizado não foi visto.
+  - Revisão item a item contra o código: um script conferiu todo caminho, script npm e serviço citados entre crases nos dois `CLAUDE.md` (todos existem; o único item sinalizado era o nome curto `jest-setup-env.js`, que passou a ser citado com o caminho `test/jest-setup-env.js`), e um `grep` confirmou a existência de cada classe, método e constante nomeados (módulos, serviços, processors, `republish`, `pipeStorageBody`, `DomainException.headers`, `transitionStatus`, `startProcessing`, `markUploadCompleted`, `STORAGE_PUBLIC_ENDPOINT`), o `ffmpeg` no `Dockerfile.dev` e os prazos do sweeper (24 h, 5 min e 15 min). Os comandos de prontidão foram executados e devolveram `PONG`, `The cluster 'local' is ready` e `accepting connections`.
+  - O `nestjs-project/CLAUDE.md` registra, na seção de arquitetura, que o `ThrottlerGuard` global da Fase 02 também vale para as rotas de vídeo (achado do SI-03.18). É documentação do comportamento atual, não uma correção: a decisão sobre liberar as rotas públicas de vídeo do limite continua com o usuário e fica como tarefa separada.
+  - Quando o usuário decidir sobre o `ThrottlerGuard`, a linha correspondente do `nestjs-project/CLAUDE.md` deve ser atualizada junto com a mudança.
