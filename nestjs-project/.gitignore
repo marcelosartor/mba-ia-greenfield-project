@@ -4,6 +4,7 @@
 
 # exemplo de vídeo do api.http
 /sample.mp4
+/proof-*.bin
 /node_modules
 /build
 

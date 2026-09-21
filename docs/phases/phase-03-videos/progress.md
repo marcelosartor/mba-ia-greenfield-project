@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 17/19 completed
+**SIs:** 18/19 completed
 
 ### SI-03.1 — Configurar dependências, namespaces de config e variáveis de ambiente de storage e fila
 - **Status:** completed
@@ -222,9 +222,25 @@
   - A documentação do processo de exportação (`nest build` em vez de `ts-node`) deve entrar nos `CLAUDE.md` no SI-03.19.
 
 ### SI-03.18 — Provar o upload de 10GB sem travar a API (script e evidência manual)
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** no tests (prova manual, como o plano define); evidência abaixo, coletada em 2026-09-20 contra a stack real do Compose (Postgres, Redis, MinIO, Mailpit, `video-worker` e a API subida para a prova)
+- **Observations:**
+  - **Passo exato para repetir a prova** (a partir de `nestjs-project/`):
+    1. Garantir 10 GiB livres no volume do MinIO (`df -h /`) e subir a stack: `docker compose up -d` (a API é iniciada à parte, pois o contêiner dela fica ocioso por padrão): `docker compose exec nestjs-api npm run start`.
+    2. Gerar o arquivo esparso dentro do diretório montado: `docker compose exec nestjs-api truncate -s 10G proof-10g.bin` (ocupa 0 bytes no disco; o `.gitignore` ignora `proof-*.bin`).
+    3. Rodar o script **em um contêiner que não seja o da API**, para o tráfego do cliente não ser contado como tráfego da API: `docker compose exec video-worker node scripts/upload-large-video.mjs proof-10g.bin` (variáveis opcionais: `API_URL`, `MAILPIT_URL`, `CONCURRENCY` (padrão 4), `WAIT_SECONDS` (padrão 600)).
+    4. Medir o tráfego: `docker stats --no-stream` dos contêineres `nestjs-api`, `video-worker` e `minio` antes e depois do envio.
+    5. Ver o desfecho: `docker compose exec db psql -U streamtube -c "select status, error_code, error_message from videos where public_id = '<public_id impresso pelo script>'"`.
+    6. Limpar: apagar `proof-10g.bin`, os objetos dos buckets e os usuários `upload-proof-*` criados; parar o processo da API.
+  - **O script** (`scripts/upload-large-video.mjs`, sem dependências além do Node) cadastra e confirma um usuário de teste (lê o token no e-mail do Mailpit), faz login, chama `POST /videos`, pede as URLs em lotes de 80 partes, envia as partes em paralelo por `PUT` com `http.request` e `Content-Length` explícito lendo o arquivo por fatias (`createReadStream` com `start`/`end`, sem carregar a parte na memória), sonda `GET /` a cada 200 ms durante todo o envio e imprime latência mínima, p50, p95, máxima e taxa de respostas 200; depois chama `POST .../upload/completion` e espera o desfecho pela API.
+  - **Saída do script na execução de 10 GiB:** arquivo de 10737418240 bytes (10,00 GiB); `POST /videos` → `201`, `status=draft`, `part_size=67108864`, `part_count=160` (o critério pedia 160); 160/160 partes enviadas em 9,1 s (1125,6 MiB/s, tudo local); `POST .../upload/completion` → `202 {"public_id":"OVsYnQKzNh4","status":"draft","upload_completed":true}`.
+  - **API durante o envio (`GET /`, 46 requisições):** 46 respostas `200` (100,00%); latência mín. 0,9 ms, p50 2,2 ms, p95 6,0 ms, **máxima 17,6 ms**.
+  - **Tráfego de rede (`docker stats`, NET I/O entrada / saída):** `nestjs-api` 3,16 GB / 5,62 GB **antes e depois, sem variação** (o valor acumulado vem de rodadas anteriores de testes dentro desse contêiner); `video-worker`, que rodou o cliente, foi de 4 MB / 213 MB para 9,25 MB / **11 GB** de saída; `minio` foi de 5,78 GB para **16,5 GB** de entrada (+10,7 GB, os 10 GiB da prova). Ou seja, os 10 GiB foram do cliente direto para o storage e não passaram pelo contêiner da API. Amostras a cada 20 s durante e depois do envio mantiveram o `nestjs-api` em 3,16 GB / 5,62 GB e ~425-450 MiB de memória, com CPU em ~0,01-0,02% (um pico de 10% em uma amostra, ao fim, sem relação com o tráfego).
+  - **Desfecho do processamento:** o vídeo `OVsYnQKzNh4` terminou em `error` com `error_code = 'INVALID_MEDIA'` e `error_message = '<url> Invalid data found when processing input'` (a URL pré-assinada aparece redigida como `<url>`), `upload_completed_at` preenchido e `upload_id` nulo. É o resultado esperado pelo plano para um arquivo esparso de zeros, que não é um MP4. O worker e a fila funcionaram no fluxo real: job consumido pelo `video-worker` do Compose, sonda ffprobe lendo o objeto de 10 GiB por URL pré-assinada e falha classificada como não retentável (uma tentativa). Um ensaio anterior com 200 MB terminou igual (`TfEpIhMAd7R`).
+  - **Ressalvas honestas:** (a) o disco e o MinIO são locais, então os 1125 MiB/s não dizem nada sobre uma rede real; (b) a prova de "vídeo válido de 10 GiB chegando a `ready`" não foi feita, pois o plano aceita `error`/`INVALID_MEDIA` e um MP4 real de 10 GiB exigiria gerar esse arquivo; o caminho `ready` é coberto pelos testes de integração do SI-03.11 com um MP4 real; (c) o `docker stats` mostra amostras pontuais, não um registro contínuo do envio de 9 s (havia uma amostra imediatamente antes e uma imediatamente depois); (d) a API foi iniciada com `npm run start` só para a prova e encerrada em seguida (o `CLAUDE.md` do projeto pede que o servidor só suba quando o usuário manda, e o SI exige a API no ar para medir a resposta dela).
+  - O `error` de um vídeo não aparece pela API (`GET /videos/{public_id}` responde `409 VIDEO_NOT_READY` para `draft`, `processing` e `error`), então o script espera todo o `WAIT_SECONDS` (aqui 300 s) quando o desfecho é `error`; o estado exato sai do banco (passo 5). O contrato não expõe o status para o dono; se a Fase 04 precisar disso, é uma decisão nova.
+  - **Achado fora do escopo, importante:** o `ThrottlerGuard` da Fase 02 é global (`APP_GUARD`, 10 requisições por minuto por IP) e vale para todas as rotas, exceto `GET /` (`@SkipThrottle()`). Comprovei com um teste descartável: 14 chamadas seguidas a `GET /videos/{public_id}/stream` devolveram `404` nas 10 primeiras e `429` da 11ª em diante. Um player que busca partes por `Range` faz muito mais que 10 requisições por minuto, então o streaming e o download públicos ficam inutilizáveis sob uso normal. Isso não é falha de um SI da Fase 03 (o limite foi decidido para a autenticação), mas quebra o objetivo dos endpoints públicos. Por isso o script espaça as consultas de estado em 12 s. Sugestão: `@SkipThrottle()` nas rotas públicas de vídeo (como no `AppController`) ou restringir o `ThrottlerGuard` aos controllers de autenticação; **precisa de decisão do usuário** e fica de fora deste SI.
+  - Na limpeza, o MinIO manteve 11 GB em `/data/.minio.sys/tmp/.trash` (a lixeira em que ele guarda objetos apagados até a coleta em segundo plano) mesmo com os buckets vazios; apaguei a lixeira à mão e o volume voltou a 184 KB.
 
 ### SI-03.19 — Atualizar CLAUDE.md e o diagrama de arquitetura e fechar a Definition of Done
 - **Status:** pending
