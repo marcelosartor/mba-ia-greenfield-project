@@ -9,6 +9,7 @@ Oferecer uma lista fixa de categorias de vídeo, mantida pela plataforma, que o 
 - O plano não pede que usuários criem ou editem categorias: a lista pertence à plataforma. A busca e a página inicial por categoria são da Fase 07.
 - Sem enunciado próprio nesta fase: os requisitos derivam do plano. Não há lista de reprova automática além das regras do `CLAUDE.md`.
 
+- **Decidido** (`docs/prd/prd-fase04-00-decisoes-previas.md`, decisão 8): tabela `categories` com `slug` único, `category_id` nulo em `videos`, lista inicial por migration de dados e o cliente usa o `slug`.
 ## Requisitos
 1. Existe uma lista de categorias, cada uma com identificador estável e nome legível.
 2. Um endpoint público lista todas as categorias, em ordem definida e estável.
@@ -27,6 +28,5 @@ Oferecer uma lista fixa de categorias de vídeo, mantida pela plataforma, que o 
 - Teste de integração confere a lista devolvida e a ordem (req. 1, 2).
 
 ## Lacunas (→ `/research`)
-- Quais categorias compõem a lista inicial e seus identificadores (slug, id numérico ou UUID).
-- Como os dados de referência entram por migration sem quebrar o `migration:generate` (migration de dados escrita à mão é a exceção prevista em `.claude/rules/typeorm-migrations.md`).
-- Internacionalização dos nomes: fixos em português ou por chave.
+- Como a migration de dados escrita à mão convive com o `migration:generate` (exceção prevista em `.claude/rules/typeorm-migrations.md`) e como fica o `down`.
+- Nomes fixos em português (assumido); confirmar que não há internacionalização nesta fase.

@@ -9,6 +9,7 @@ Dar ao dono do canal uma listagem de todos os seus vídeos, em qualquer estado, 
 - Visualizações, likes e comentários **não existem ainda**: visualizações vêm da página de vídeo (Fase 05) e likes e comentários da Fase 06. A listagem precisa do formato desses campos agora sem inventar dado.
 - O guard global limita a 10 requisições por minuto por IP (Fase 02); um painel que recarrega a lista precisa de folga (a Fase 03 liberou só as rotas públicas de leitura de vídeo desse limite).
 
+- **Decidido** (PRD 00, decisões 12, 13 e 14): rota `GET /channels/me/videos`; `views`, `likes` e `comments` com `0` fixo no contrato; paginação `page` + `limit` (20 padrão, 50 máximo) com `total` e `total_pages`.
 ## Requisitos
 1. O dono lista os vídeos do próprio canal, de todos os status, mais recentes primeiro, com paginação.
 2. Cada item traz: `public_id`, título, capa (PRD 03), status de processamento, estado editorial e visibilidade (PRD 04), instante de publicação, criação, e contagens de visualizações, likes e comentários.
@@ -31,8 +32,6 @@ Dar ao dono do canal uma listagem de todos os seus vídeos, em qualquer estado, 
 - Anônimo recebe 401 (req. 6).
 
 ## Lacunas (→ `/research`)
-- Valor e origem das contagens hoje: zero constante, colunas de contador agora, ou tabelas das Fases 05 e 06; e o custo de cada escolha para não refazer o contrato.
-- Estilo de paginação (offset ou cursor), limite por página e ordenação padrão.
-- Como a capa entra no item (URL do endpoint do PRD 03).
-- Se o painel precisa de um limite de requisições próprio, dado o `ThrottlerGuard` global.
-- Rota: recurso do canal do usuário logado (`/channels/me/videos`) ou coleção filtrada de `/videos`.
+- **Rate limit das rotas autenticadas** (pendente do PRD 00): o painel e as edições usam o `ThrottlerGuard` global de 10 requisições por minuto por IP; decidir o limite.
+- Consulta eficiente (índice por canal e ordenação; sem N+1 na capa e na categoria).
+- Filtros aceitos (status de processamento, estado editorial, visibilidade) e a combinação entre eles.

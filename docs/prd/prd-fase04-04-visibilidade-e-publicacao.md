@@ -9,6 +9,7 @@ Dar ao dono controle sobre quando e para quem o vídeo aparece: publicar e despu
 - Estado atual: `GET /videos/{public_id}`, `/stream` e `/download` só checam `status = ready` (`VideosService.getReadyVideo`, `VideoStreamingService`); o `Cache-Control: no-cache` foi escolhido justamente por não haver visibilidade.
 - Atenção à palavra "rascunho": na Fase 03 o status `draft` significa upload em andamento ou concluído aguardando o worker; na Fase 04 "rascunho → publicação" é o estado editorial do vídeo. Não são a mesma coisa.
 
+- **Decidido** (PRD 00, decisões 1, 2, 3, 5, 6 e 7): `visibility` e `published_at` em colunas separadas com `CHECK` de `ready`; vídeos `ready` existentes viram `unlisted` publicados; `POST` e `DELETE /videos/{public_id}/publication`; não-dono recebe `404` em rascunho; `@OptionalAuth()` (token inválido = anônimo; só cabeçalho `Authorization`); `Cache-Control: private, no-cache`.
 ## Requisitos
 1. Um vídeo tem um estado editorial (rascunho ou publicado) e uma visibilidade (pública ou não listada), independentes do status de processamento.
 2. O dono publica um vídeo seu somente se o processamento terminou (`ready`); publicar registra o instante da publicação.
@@ -30,8 +31,7 @@ Dar ao dono controle sobre quando e para quem o vídeo aparece: publicar e despu
 - A migration é reversível e os vídeos existentes têm estado definido (req. 7).
 
 ## Lacunas (→ `/research`)
-- Representação: colunas separadas de visibilidade e `published_at`, ou uma máquina de estados; e a interação com as transições por compare-and-set do processamento.
-- Como um usuário que não é dono vê um vídeo em rascunho: 404 (esconde a existência) ou 409/403 (a Fase 03 usa 404 e 403 diferentes na sessão de upload).
-- Destino dos vídeos `ready` que já existem: publicados e públicos, ou rascunho.
-- Autenticação opcional nas rotas públicas: hoje elas são `@Public()` e ignoram o token; o dono precisa ser reconhecido quando enviar um.
-- Efeito sobre `Cache-Control` e sobre o `ETag` de `stream` e `download`.
+- O `UPDATE` condicional que publica (compare-and-set sobre `status = 'ready'`) e o que devolve num vídeo já publicado (idempotência).
+- Índices para as listagens (`published_at`, `visibility`) e a interação com o índice existente de status.
+- Como o `@OptionalAuth()` é implementado no `JwtAuthGuard` global e testado (token expirado, malformado, ausente).
+- Efeito no `ETag` de `stream` e `download` quando o mesmo vídeo é lido pelo dono e por um anônimo.

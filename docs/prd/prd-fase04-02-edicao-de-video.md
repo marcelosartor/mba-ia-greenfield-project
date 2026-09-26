@@ -10,6 +10,7 @@ Permitir que o dono de um vídeo edite título, descrição e categoria, a qualq
 - O identificador público é o `public_id`; o UUID interno nunca aparece na API.
 - A thumbnail customizada é o PRD 03; visibilidade e publicação, o PRD 04.
 
+- **Decidido** (PRD 00, decisões 4, 9 e 10): edição em qualquer status de processamento; título 1 a 100 e descrição até 5.000 como texto puro; `PATCH` parcial com `category` por `slug` (`null` limpa) e `visibility`; campo desconhecido é `400`; vídeo não `ready` segue `409` na leitura até para o dono.
 ## Requisitos
 1. O dono edita título, descrição e categoria de um vídeo seu, em uma ou mais chamadas parciais (só o que vier no corpo muda).
 2. Título é obrigatório e não vazio, com o limite da coluna; descrição é opcional, com limite definido; categoria é opcional e referencia uma categoria existente (PRD 01).
@@ -31,7 +32,6 @@ Permitir que o dono de um vídeo edite título, descrição e categoria, a qualq
 - A migration cria as colunas e é reversível (req. 5).
 
 ## Lacunas (→ `/research`)
-- Em quais status o vídeo pode ser editado (`draft` com upload em andamento, `processing`, `error`) e se editar durante o processamento afeta o worker.
-- Limite da descrição e regras de sanitização de texto (o conteúdo será exibido em páginas públicas).
-- Se a edição usa `PATCH` parcial ou `PUT` e como se limpa a categoria (valor nulo).
-- Como a leitura pública de metadados passa a expor descrição e categoria (contrato de `GET /videos/{public_id}`).
+- Corpo vazio (`{}`): `400` ou `200` sem mudança.
+- Detalhe do DTO campo a campo e da validação de caracteres de controle.
+- `ETag` ou `updated_at` na resposta do `PATCH` (edição concorrente do mesmo vídeo por duas abas).

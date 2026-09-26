@@ -10,6 +10,7 @@ Permitir que o dono edite nickname, nome e descrição do canal, e expor uma pá
 - A listagem pública só mostra vídeos publicados e públicos (PRD 04). Vídeo não listado nunca aparece.
 - As rotas públicas precisam ficar fora do limite global de 10 requisições por minuto, como as de leitura de vídeo (lição da Fase 03).
 
+- **Decidido** (PRD 00, decisões 12, 14, 15, 16 e 17): rotas `PATCH /channels/me`, `GET /channels/{nickname}` e `GET /channels/{nickname}/videos`; nickname `^[a-z0-9_]{3,50}$` com reservados, unicidade pelo `UNIQUE`, e a troca muda o endereço sem redirecionamento; o canal público expõe `name`, `nickname`, `description`, `created_at` e `video_count`; throttler nomeado `public-read` nas rotas públicas.
 ## Requisitos
 1. O dono edita nickname, nome e descrição do próprio canal (parcialmente); só ele.
 2. Nickname respeita formato e tamanho definidos e é único; conflito retorna 409 sem alterar nada, inclusive sob concorrência.
@@ -33,7 +34,6 @@ Permitir que o dono edite nickname, nome e descrição do canal, e expor uma pá
 - Anônimo tentando editar recebe 401; canal inexistente 404 (req. 6, 7).
 
 ## Lacunas (→ `/research`)
-- Regras de nickname (formato, mínimo, palavras reservadas, caixa) e como a unicidade é decidida (constraint como árbitro, como no `public_id`).
-- Se o endereço público usa o nickname mesmo mudando (e o que acontece com links antigos) ou um identificador estável.
-- Formato e estilo de paginação da listagem pública (compartilhado com o PRD 05).
-- Como a rota pública sai do limite global sem abrir mão do limite nas rotas de escrita.
+- Como se detecta o conflito de nickname sob concorrência (capturar a violação do `UNIQUE` como no `public_id`) e o que fazer com a checagem prévia.
+- Consulta de `video_count` e da listagem pública (índice) e o custo com muitos vídeos.
+- Como o throttler `public-read` é aplicado por rota sem afrouxar as rotas de escrita.

@@ -10,6 +10,7 @@ Permitir que o dono de um vídeo escolha a própria imagem de capa e volte à ca
 - As URLs pré-assinadas usam o host do Compose (`minio`), inutilizáveis por um browser nesta fase (decisão TD-09 da Fase 03).
 - O reprocessamento do worker (republicação, redelivery) reescreve a capa gerada no mesmo objeto.
 
+- **Decidido** (PRD 00, decisão 11): envio pela API (multipart, até 2 MiB), conteúdo validado, JPEG/PNG/WebP regravado como JPEG de 640 px com ffmpeg (remove EXIF); duas chaves (`thumbnail_key` gerada e `custom_thumbnail_key`); `GET`, `PUT` e `DELETE /videos/{public_id}/thumbnail`; o worker nunca toca na customizada.
 ## Requisitos
 1. O dono envia uma imagem como capa customizada de um vídeo seu; ela passa a ser a capa do vídeo.
 2. Só formatos de imagem aceitos e com tamanho máximo definido; o conteúdo é validado (não só a extensão nem o `content_type`).
@@ -31,7 +32,7 @@ Permitir que o dono de um vídeo escolha a própria imagem de capa e volte à ca
 - Não-dono recebe 403 e anônimo, 401 (req. 6).
 
 ## Lacunas (→ `/research`)
-- Como a imagem chega ao storage: pela API (é pequena) ou por URL pré-assinada com confirmação, e como o conteúdo é validado nos dois casos.
-- Chave da capa customizada e como coexistem a gerada e a customizada (dois campos ou uma chave só).
-- Como os clientes obtêm a capa: endpoint na API com streaming, URL pré-assinada de leitura, ou outro (impacta a Fase 07).
-- Formatos, dimensões mínimas e máximas e limite de bytes.
+- Biblioteca do multipart (`multer` embutido no Nest) e como validar o tamanho antes de ler o arquivo inteiro.
+- Decodificador: o ffmpeg do contêiner (já usado pelo worker) ou uma biblioteca de imagem; o custo de chamá-lo na API e o timeout.
+- Dimensões mínimas e máximas aceitas e tratamento de imagens animadas (WebP/PNG animados).
+- Concorrência entre dois `PUT` da capa do mesmo vídeo e limpeza do objeto antigo.
