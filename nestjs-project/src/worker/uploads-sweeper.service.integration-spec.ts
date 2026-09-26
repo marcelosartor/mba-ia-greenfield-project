@@ -89,7 +89,7 @@ describe('UploadsSweeperService (integration)', () => {
 
   const backdate = (
     id: string,
-    column: 'created_at' | 'upload_completed_at',
+    column: 'created_at' | 'upload_completed_at' | 'updated_at',
     when: Date,
   ): Promise<unknown> =>
     dataSource.query(`UPDATE "videos" SET "${column}" = $1 WHERE "id" = $2`, [
@@ -246,6 +246,54 @@ describe('UploadsSweeperService (integration)', () => {
       await sweeper.run();
 
       expect(await jobIds()).toEqual([]);
+    });
+  });
+
+  describe('videos stuck in processing', () => {
+    const stuckVideo = async (updatedAgoMs: number): Promise<Video> => {
+      const draft = await videos.createDraft({
+        channelId: channel.id,
+        title: 'Stuck',
+        extension: 'mp4',
+      });
+      await videos.markUploadCompleted(draft.id);
+      await videos.startProcessing(draft.id);
+      await backdate(draft.id, 'updated_at', ago(updatedAgoMs));
+      return draft;
+    };
+
+    it('should queue again a video left in processing with no job at all', async () => {
+      const draft = await stuckVideo(3 * HOUR_MS);
+
+      const result = await sweeper.run();
+
+      expect(result.stuckRepublished).toBe(1);
+      expect((await queue.getJob(draft.id))?.data).toEqual({
+        videoId: draft.id,
+      });
+    });
+
+    it('should leave alone a video processed a few minutes ago', async () => {
+      await stuckVideo(10 * MINUTE_MS);
+
+      const result = await sweeper.run();
+
+      expect(result.stuckRepublished).toBe(0);
+      expect(await jobIds()).toEqual([]);
+    });
+
+    it('should not touch a stuck video whose job is still waiting or running', async () => {
+      const draft = await stuckVideo(3 * HOUR_MS);
+      await queue.add(
+        'process-video',
+        { videoId: draft.id },
+        { jobId: draft.id },
+      );
+
+      await sweeper.run();
+      await sweeper.run();
+
+      expect(await jobIds()).toEqual([draft.id]);
     });
   });
 
