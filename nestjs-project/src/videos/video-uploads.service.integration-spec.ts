@@ -9,6 +9,7 @@ import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { VerificationToken } from '../auth/entities/verification-token.entity';
 import { Channel } from '../channels/entities/channel.entity';
 import {
+  InvalidPartNumberException,
   StorageUnavailableException,
   UploadAlreadyCompletedException,
   UploadIncompleteException,
@@ -135,6 +136,7 @@ describe('VideoUploadsService (integration)', () => {
     expect(video.upload_completed_at).toBeNull();
     expect(video.video_key).toBe(`${channel.id}/${video.id}/source.mp4`);
     expect(video.upload_id).toBeTruthy();
+    expect(video.declared_size_bytes).toBe(200_000_000);
     // listParts fails with NoSuchUpload when the multipart does not exist
     await expect(
       storage.listParts(video.video_key, video.upload_id as string),
@@ -167,8 +169,8 @@ describe('VideoUploadsService (integration)', () => {
       .getRepository(Video)
       .findOneByOrFail({ public_id });
     for (const [partNumber, size] of [
-      [1, 1024],
-      [2, 2048],
+      [1, PART_SIZE],
+      [2, PART_SIZE],
     ]) {
       const url = await storage.presignUploadPart(
         video.video_key,
@@ -186,8 +188,8 @@ describe('VideoUploadsService (integration)', () => {
 
     expect(session.upload_completed).toBe(false);
     expect(session.uploaded_parts).toEqual([
-      { part_number: 1, size_bytes: 1024 },
-      { part_number: 2, size_bytes: 2048 },
+      { part_number: 1, size_bytes: PART_SIZE },
+      { part_number: 2, size_bytes: PART_SIZE },
     ]);
   });
 
@@ -247,7 +249,7 @@ describe('VideoUploadsService (integration)', () => {
       expect(new URL(part.url).hostname).toBe('minio');
       const response = await fetch(part.url, {
         method: 'PUT',
-        body: Buffer.alloc(512),
+        body: Buffer.alloc(PART_SIZE),
       });
       expect(response.ok).toBe(true);
     }
@@ -413,6 +415,63 @@ describe('VideoUploadsService (integration)', () => {
       expect((await queue.getJob(video.id))?.data).toEqual({
         videoId: video.id,
       });
+    });
+  });
+
+  describe('the declared size', () => {
+    const declare = async (sizeBytes: number) => {
+      const { public_id } = await service.initiate(user.id, {
+        filename: 'holiday.mp4',
+        content_type: 'video/mp4',
+        size_bytes: sizeBytes,
+      });
+      return public_id;
+    };
+
+    it('should make the storage refuse a part of any length but the signed one', async () => {
+      const publicId = await declare(PART_SIZE + 2_000);
+      const { parts } = await service.requestPartUrls(user.id, publicId, {
+        part_numbers: [1, 2],
+      });
+      const put = (url: string, size: number) =>
+        fetch(url, { method: 'PUT', body: Buffer.alloc(size) });
+
+      // part 1 must be a full part, part 2 (the last) exactly the rest
+      expect((await put(parts[0].url, PART_SIZE + 1)).status).toBe(403);
+      expect((await put(parts[0].url, PART_SIZE - 1)).status).toBe(403);
+      expect((await put(parts[1].url, 3_000)).status).toBe(403);
+      expect((await put(parts[0].url, PART_SIZE)).ok).toBe(true);
+      expect((await put(parts[1].url, 2_000)).ok).toBe(true);
+    });
+
+    it('should refuse the URL of a part beyond the declared size', async () => {
+      const publicId = await declare(PART_SIZE + 2_000);
+
+      await expect(
+        service.requestPartUrls(user.id, publicId, { part_numbers: [3] }),
+      ).rejects.toBeInstanceOf(InvalidPartNumberException);
+      await expect(
+        service.requestPartUrls(user.id, publicId, { part_numbers: [2] }),
+      ).resolves.toBeDefined();
+    });
+
+    it('should not complete an upload whose last part is missing', async () => {
+      const publicId = await declare(PART_SIZE + 2_000);
+      const { parts } = await service.requestPartUrls(user.id, publicId, {
+        part_numbers: [1],
+      });
+      await fetch(parts[0].url, {
+        method: 'PUT',
+        body: Buffer.alloc(PART_SIZE),
+      });
+
+      await expect(
+        service.completeUpload(user.id, publicId),
+      ).rejects.toBeInstanceOf(UploadIncompleteException);
+      const stored = await dataSource
+        .getRepository(Video)
+        .findOneByOrFail({ public_id: publicId });
+      expect(stored.upload_completed_at).toBeNull();
     });
   });
 });

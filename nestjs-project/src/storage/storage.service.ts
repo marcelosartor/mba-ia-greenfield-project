@@ -91,6 +91,7 @@ export class StorageService {
     uploadId: string,
     partNumber: number,
     expiresInSeconds: number = PRESIGNED_URL_EXPIRATION_SECONDS,
+    contentLength?: number,
   ): Promise<string> {
     return this.run(() =>
       getSignedUrl(
@@ -100,8 +101,16 @@ export class StorageService {
           Key: key,
           UploadId: uploadId,
           PartNumber: partNumber,
+          ContentLength: contentLength,
         }),
-        { expiresIn: expiresInSeconds },
+        {
+          expiresIn: expiresInSeconds,
+          // Signed, the length is enforced by the storage: a PUT of any other
+          // size is refused (403 SignatureDoesNotMatch).
+          ...(contentLength !== undefined && {
+            signableHeaders: new Set(['content-length']),
+          }),
+        },
       ),
     );
   }

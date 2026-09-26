@@ -53,6 +53,16 @@ export class Video {
   @Column({ type: 'varchar', length: 1024, nullable: true })
   upload_id: string | null;
 
+  // Size the client declared when starting the upload. It bounds the part
+  // numbers and fixes the length signed into each presigned part URL. Null only
+  // for drafts created before the column existed.
+  @Column({
+    type: 'bigint',
+    nullable: true,
+    transformer: nullableNumberTransformer,
+  })
+  declared_size_bytes: number | null;
+
   @Column({ type: 'timestamp', nullable: true })
   upload_completed_at: Date | null;
 

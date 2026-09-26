@@ -7,6 +7,7 @@ import { Video } from '../videos/entities/video.entity';
 import { CreateUsersAndChannels1775687773260 } from './migrations/1775687773260-CreateUsersAndChannels';
 import { CreateAuthTokens1777579850478 } from './migrations/1777579850478-CreateAuthTokens';
 import { CreateVideos1789938672313 } from './migrations/1789938672313-CreateVideos';
+import { AddDeclaredSizeToVideos1790433669266 } from './migrations/1790433669266-AddDeclaredSizeToVideos';
 import { createTestDataSource } from '../test/create-test-data-source';
 
 const MANAGED_TABLES = [
@@ -29,6 +30,7 @@ describe('Database migrations (integration)', () => {
           CreateUsersAndChannels1775687773260,
           CreateAuthTokens1777579850478,
           CreateVideos1789938672313,
+          AddDeclaredSizeToVideos1790433669266,
         ],
       },
     );
@@ -48,7 +50,7 @@ describe('Database migrations (integration)', () => {
   });
 
   afterAll(async () => {
-    // The second test undoes the last migration, leaving the videos table missing.
+    // The last two tests undo migrations, leaving the videos table missing.
     // Re-apply so the shared DB is fully migrated when subsequent suites run.
     try {
       await dataSource.runMigrations();
@@ -60,7 +62,7 @@ describe('Database migrations (integration)', () => {
   it('should apply all migrations and create all five tables', async () => {
     const ranMigrations = await dataSource.runMigrations();
 
-    expect(ranMigrations).toHaveLength(3);
+    expect(ranMigrations).toHaveLength(4);
 
     const result = await dataSource.query<{ table_name: string }[]>(
       `SELECT table_name FROM information_schema.tables
@@ -79,7 +81,25 @@ describe('Database migrations (integration)', () => {
     ]);
   });
 
-  it('should revert the last migration and remove the videos table', async () => {
+  const columnsOfVideos = async (): Promise<string[]> =>
+    (
+      await dataSource.query<{ column_name: string }[]>(
+        `SELECT column_name FROM information_schema.columns
+         WHERE table_schema = 'public' AND table_name = 'videos'`,
+      )
+    ).map((row) => row.column_name);
+
+  it('should add the declared size column and revert it without touching the table', async () => {
+    expect(await columnsOfVideos()).toContain('declared_size_bytes');
+
+    await dataSource.undoLastMigration();
+
+    const columns = await columnsOfVideos();
+    expect(columns).not.toContain('declared_size_bytes');
+    expect(columns).toContain('upload_completed_at');
+  });
+
+  it('should revert the videos migration and remove the table', async () => {
     await dataSource.undoLastMigration();
 
     const result = await dataSource.query<{ table_name: string }[]>(

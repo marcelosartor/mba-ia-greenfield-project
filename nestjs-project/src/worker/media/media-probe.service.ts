@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { ConfigType } from '@nestjs/config';
 import videoConfig from '../../config/video.config';
-import { INPUT_PROTOCOLS, runMediaTool } from './media-tool';
+import { SAFE_INPUT_OPTIONS, runMediaTool } from './media-tool';
 import { mapProbeOutput } from './media-probe.mapper';
 import { InvalidMediaError } from './media.errors';
 import type { FfprobeOutput, MediaMetadata } from './media.types';
@@ -25,7 +25,7 @@ export class MediaProbeService {
       [
         '-v',
         'error',
-        ...INPUT_PROTOCOLS,
+        ...SAFE_INPUT_OPTIONS,
         '-print_format',
         'json',
         '-show_format',

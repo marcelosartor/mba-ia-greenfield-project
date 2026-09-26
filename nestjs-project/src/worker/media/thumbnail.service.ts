@@ -5,7 +5,7 @@ import { readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import videoConfig from '../../config/video.config';
-import { INPUT_PROTOCOLS, runMediaTool } from './media-tool';
+import { SAFE_INPUT_OPTIONS, runMediaTool } from './media-tool';
 import { InvalidMediaError } from './media.errors';
 
 export const THUMBNAIL_WIDTH_PX = 640;
@@ -53,7 +53,7 @@ export class ThumbnailService {
           '-v',
           'error',
           '-nostdin',
-          ...INPUT_PROTOCOLS,
+          ...SAFE_INPUT_OPTIONS,
           '-ss',
           thumbnailSeekSeconds(durationSeconds).toFixed(3),
           '-i',

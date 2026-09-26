@@ -15,6 +15,7 @@ export interface CreateDraftInput {
   channelId: string;
   title: string;
   extension: string;
+  declaredSizeBytes: number;
 }
 
 @Injectable()
@@ -44,6 +45,7 @@ export class VideosRepository {
             title: input.title,
             status: VideoStatus.DRAFT,
             video_key: `${input.channelId}/${id}/source.${input.extension}`,
+            declared_size_bytes: input.declaredSizeBytes,
           }),
         );
       } catch (error) {

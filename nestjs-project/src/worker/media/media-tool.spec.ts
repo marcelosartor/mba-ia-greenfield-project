@@ -1,4 +1,9 @@
-import { classifyToolFailure, redactUrls } from './media-tool';
+import {
+  ALLOWED_INPUT_FORMATS,
+  SAFE_INPUT_OPTIONS,
+  classifyToolFailure,
+  redactUrls,
+} from './media-tool';
 import { InvalidMediaError, TransientMediaError } from './media.errors';
 
 describe('classifyToolFailure', () => {
@@ -42,5 +47,24 @@ describe('redactUrls', () => {
     expect(redactUrls('a http://x/y?z=1 b https://q/r c')).toBe(
       'a <url> b <url> c',
     );
+  });
+});
+
+describe('SAFE_INPUT_OPTIONS', () => {
+  it('should whitelist only the containers the upload accepts', () => {
+    expect(ALLOWED_INPUT_FORMATS.split(',').sort()).toEqual([
+      'matroska',
+      'mov',
+      'mp4',
+      'webm',
+    ]);
+    const index = SAFE_INPUT_OPTIONS.indexOf('-format_whitelist');
+    expect(SAFE_INPUT_OPTIONS[index + 1]).toBe(ALLOWED_INPUT_FORMATS);
+  });
+
+  it('should not allow playlist demuxers or protocols beyond HTTP(S)', () => {
+    const joined = SAFE_INPUT_OPTIONS.join(' ');
+
+    expect(joined).not.toMatch(/hls|dash|concat|file|ftp|rtmp|rtsp|data/i);
   });
 });
