@@ -19,6 +19,7 @@ import {
   ApiTags,
   getSchemaPath,
 } from '@nestjs/swagger';
+import { SkipThrottle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import type { Readable } from 'node:stream';
 import type { JwtPayload } from '../auth/auth.types';
@@ -36,6 +37,9 @@ import { VideoUploadsService } from './video-uploads.service';
 import { VideosService } from './videos.service';
 import type { InitiatedUpload } from './videos.types';
 
+// The public reading routes opt out of the global ThrottlerGuard (10 requests
+// per minute per IP, meant for authentication): a player issues one Range
+// request per seek and would be answered 429 within seconds.
 const ApiPublicIdParam = () =>
   ApiParam({
     name: 'public_id',
@@ -256,6 +260,7 @@ export class VideosController {
   }
 
   @Public()
+  @SkipThrottle()
   @Get(':public_id')
   @ApiPublicIdParam()
   @ApiOperation({
@@ -285,6 +290,7 @@ export class VideosController {
   }
 
   @Public()
+  @SkipThrottle()
   @Get(':public_id/stream')
   @ApiPublicIdParam()
   @ApiOperation({
@@ -343,6 +349,7 @@ export class VideosController {
   }
 
   @Public()
+  @SkipThrottle()
   @Get(':public_id/download')
   @ApiPublicIdParam()
   @ApiOperation({

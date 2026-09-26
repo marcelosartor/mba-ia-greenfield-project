@@ -194,7 +194,7 @@ Things to keep in mind when changing these modules:
 - The worker throws transient errors so BullMQ retries them; only `InvalidMediaError` becomes an `UnrecoverableError`. The "log and do not rethrow" rule for services applies only to the worker's event handler and the sweeper, never to `VideoProcessor.process`.
 - Stream and download return a `StreamableFile` and destroy the storage stream when the client closes the connection (`pipeStorageBody` in the controller); never buffer the file.
 - Errors that carry response headers (e.g. `Content-Range` on `INVALID_RANGE`) declare them on `DomainException.headers`, and the filter applies them.
-- The ThrottlerGuard from Phase 02 is global (10 requests per minute per IP) and also applies to the video routes except `GET /`; see `docs/phases/phase-03-videos/progress.md` (SI-03.18) for the effect on streaming.
+- The ThrottlerGuard from Phase 02 is global (10 requests per minute per IP) and applies to every route except `GET /` and the three public video reads (`GET /videos/{public_id}`, `/stream`, `/download`), which carry `@SkipThrottle()`: a player sends one Range request per seek and would get `429` within seconds. New public routes that a client calls repeatedly need the same opt-out; `test/videos-public-throttle.e2e-spec.ts` covers it.
 - `scripts/upload-large-video.mjs` is the manual 10 GiB upload proof (steps in `docs/phases/phase-03-videos/progress.md`, SI-03.18); run it in a container other than `nestjs-api`.
 - The e2e specs come from `specs/*.plan.md` (one per endpoint); helpers live in `test/helpers/` and `src/test/`.
 
