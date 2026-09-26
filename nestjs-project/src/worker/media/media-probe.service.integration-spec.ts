@@ -8,7 +8,15 @@ import storageConfig from '../../config/storage.config';
 import videoConfig from '../../config/video.config';
 import { StorageModule } from '../../storage/storage.module';
 import { StorageService } from '../../storage/storage.service';
-import { generateMp4 } from '../../test/media-fixtures';
+import {
+  generateMp4,
+  generateVideo,
+  type Container,
+} from '../../test/media-fixtures';
+import {
+  hlsPlaylistPointingTo,
+  startHitRecorder,
+} from '../../test/internal-server';
 import {
   createStorageTestClient,
   deleteStoredObject,
@@ -166,5 +174,31 @@ describe('MediaProbeService (integration)', () => {
     await expect(
       probeService.probe('file:///etc/passwd'),
     ).rejects.toBeInstanceOf(InvalidMediaError);
+  });
+
+  it.each(['mp4', 'mov', 'mkv', 'webm'] as Container[])(
+    'should still probe a real %s file',
+    async (container) => {
+      const url = await storeAndSign(await generateVideo(container));
+
+      const result = await probeService.probe(url);
+
+      expect(result).toMatchObject({ width: 160, height: 120 });
+    },
+  );
+
+  it('should not follow the URLs of a playlist uploaded as an mp4 (SSRF)', async () => {
+    const internal = await startHitRecorder();
+    try {
+      const url = await storeAndSign(hlsPlaylistPointingTo(internal.url));
+
+      await expect(probeService.probe(url)).rejects.toBeInstanceOf(
+        InvalidMediaError,
+      );
+
+      expect(internal.hits).toEqual([]);
+    } finally {
+      await internal.close();
+    }
   });
 });

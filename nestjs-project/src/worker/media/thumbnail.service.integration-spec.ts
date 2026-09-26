@@ -9,7 +9,13 @@ import videoConfig from '../../config/video.config';
 import { StorageModule } from '../../storage/storage.module';
 import { StorageService } from '../../storage/storage.service';
 import {
+  hlsPlaylistPointingTo,
+  startHitRecorder,
+} from '../../test/internal-server';
+import {
   averageLuma,
+  generateVideo,
+  type Container,
   generateBlackThenWhiteMp4,
   generateMp4,
   readJpegSize,
@@ -127,5 +133,31 @@ describe('ThumbnailService (integration)', () => {
       thumbnails.generate(url, 1, AbortSignal.abort()),
     ).rejects.toBeInstanceOf(TransientMediaError);
     expect(await leftovers()).toEqual([]);
+  });
+
+  it.each(['mp4', 'mov', 'mkv', 'webm'] as Container[])(
+    'should still make a thumbnail of a real %s file',
+    async (container) => {
+      const url = await storeAndSign(await generateVideo(container));
+
+      const image = await thumbnails.generate(url, 2);
+
+      expect(readJpegSize(image)).toEqual({ width: 640, height: 480 });
+    },
+  );
+
+  it('should not follow the URLs of a playlist uploaded as an mp4 (SSRF)', async () => {
+    const internal = await startHitRecorder();
+    try {
+      const url = await storeAndSign(hlsPlaylistPointingTo(internal.url));
+
+      await expect(thumbnails.generate(url, 1)).rejects.toBeInstanceOf(
+        InvalidMediaError,
+      );
+
+      expect(internal.hits).toEqual([]);
+    } finally {
+      await internal.close();
+    }
   });
 });
