@@ -2,7 +2,11 @@ import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import type { ConfigType } from '@nestjs/config';
 import redisConfig from '../config/redis.config';
-import { QUEUE_NAMES, VIDEO_PROCESSING_JOB_OPTIONS } from './queue.constants';
+import {
+  MAINTENANCE_JOB_OPTIONS,
+  QUEUE_NAMES,
+  VIDEO_PROCESSING_JOB_OPTIONS,
+} from './queue.constants';
 import { VideoProcessingPublisher } from './video-processing.publisher';
 
 @Module({
@@ -20,7 +24,10 @@ import { VideoProcessingPublisher } from './video-processing.publisher';
         defaultJobOptions: { ...VIDEO_PROCESSING_JOB_OPTIONS },
       },
       { name: QUEUE_NAMES.VIDEO_PROCESSING_DLQ },
-      { name: QUEUE_NAMES.VIDEO_MAINTENANCE },
+      {
+        name: QUEUE_NAMES.VIDEO_MAINTENANCE,
+        defaultJobOptions: { ...MAINTENANCE_JOB_OPTIONS },
+      },
     ),
   ],
   providers: [VideoProcessingPublisher],
