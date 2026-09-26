@@ -170,7 +170,8 @@ export class VideosController {
   })
   @ApiResponse({
     status: 400,
-    description: 'Validation failed',
+    description:
+      'Validation failed, or a part number beyond the parts of the declared size (INVALID_PART_NUMBER)',
     schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
   })
   @ApiResponse({

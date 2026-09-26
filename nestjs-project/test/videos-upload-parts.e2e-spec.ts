@@ -132,4 +132,24 @@ describe('POST /videos/:public_id/upload/parts (e2e)', () => {
   it('should reject an anonymous request', async () => {
     await requestParts([1], null).expect(401);
   });
+
+  it('should refuse the part number of a part beyond the declared size', async () => {
+    // 6_000_000 bytes with 5 MiB parts are two parts
+    const res = await requestParts([1, 3]).expect(400);
+
+    expect((res.body as { error: string }).error).toBe('INVALID_PART_NUMBER');
+  });
+
+  it('should make the storage refuse a part of a different length than the signed one', async () => {
+    const res = await requestParts([1]).expect(201);
+    const { url } = (res.body as PartsBody).parts[0];
+
+    const tooBig = await fetch(url, {
+      method: 'PUT',
+      body: Buffer.alloc(PART_SIZE + 1),
+    });
+
+    expect(tooBig.status).toBe(403);
+    await expect(putPart(url, PART_SIZE)).resolves.toBeTruthy();
+  });
 });

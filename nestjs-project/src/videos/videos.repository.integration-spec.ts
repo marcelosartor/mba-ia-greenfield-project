@@ -59,7 +59,12 @@ describe('VideosRepository (integration)', () => {
   });
 
   const createDraft = (title = 'A video'): Promise<Video> =>
-    repository.createDraft({ channelId: channel.id, title, extension: 'mp4' });
+    repository.createDraft({
+      channelId: channel.id,
+      title,
+      extension: 'mp4',
+      declaredSizeBytes: 1_000,
+    });
 
   describe('createDraft', () => {
     it('should insert a draft with a public_id and a key under the channel', async () => {
@@ -121,6 +126,7 @@ describe('VideosRepository (integration)', () => {
           channelId: '00000000-0000-4000-8000-000000000000',
           title: 'Orphan',
           extension: 'mp4',
+          declaredSizeBytes: 1_000,
         }),
       ).rejects.toMatchObject({ driverError: { code: '23503' } });
     });

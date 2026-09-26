@@ -88,6 +88,7 @@ describe('VideoProcessor (integration)', () => {
       channelId: channel.id,
       title: 'Holiday',
       extension: 'mp4',
+      declaredSizeBytes: 1_000,
     });
     await storage.putObject(
       storage.videosBucket,
@@ -175,6 +176,7 @@ describe('VideoProcessor (integration)', () => {
       channelId: channel.id,
       title: 'Still uploading',
       extension: 'mp4',
+      declaredSizeBytes: 1_000,
     });
 
     await publisher.publish(draft.id);

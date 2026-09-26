@@ -124,3 +124,13 @@ export class InvalidRangeException extends DomainException {
     });
   }
 }
+
+export class InvalidPartNumberException extends DomainException {
+  constructor() {
+    super(
+      'INVALID_PART_NUMBER',
+      400,
+      'Part number is beyond the number of parts of the declared size',
+    );
+  }
+}
