@@ -255,6 +255,7 @@ describe('UploadsSweeperService (integration)', () => {
         channelId: channel.id,
         title: 'Stuck',
         extension: 'mp4',
+        declaredSizeBytes: 1_000,
       });
       await videos.markUploadCompleted(draft.id);
       await videos.startProcessing(draft.id);
