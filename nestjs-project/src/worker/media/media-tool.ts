@@ -7,10 +7,21 @@ const execFileAsync = promisify(execFile);
 const MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 const MAX_ERROR_MESSAGE_LENGTH = 500;
 
-// The source is always a presigned HTTP(S) URL; nothing else may be opened.
-export const INPUT_PROTOCOLS = [
+// The uploaded file is untrusted: only its extension and declared type are
+// checked at upload, so its content decides what ffmpeg/ffprobe would do with
+// it. An HLS or DASH playlist named `a.mp4` would make them fetch every URL it
+// lists from the worker's network (SSRF), so the demuxers are restricted to
+// the containers the upload accepts (mp4, mov, mkv, webm), and the protocols
+// to the HTTP(S) of the presigned source URL.
+export const ALLOWED_INPUT_FORMATS = 'mov,mp4,matroska,webm';
+export const ALLOWED_INPUT_PROTOCOLS = 'http,https,tcp,tls,crypto';
+
+/** Input options every ffmpeg/ffprobe call on an uploaded file must carry. */
+export const SAFE_INPUT_OPTIONS = [
+  '-format_whitelist',
+  ALLOWED_INPUT_FORMATS,
   '-protocol_whitelist',
-  'http,https,tcp,tls,crypto',
+  ALLOWED_INPUT_PROTOCOLS,
 ];
 
 // stderr of ffprobe/ffmpeg when the remote source cannot be read (as opposed

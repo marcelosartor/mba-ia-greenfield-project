@@ -131,3 +131,43 @@ export async function averageLuma(image: Buffer): Promise<number> {
     await rm(input, { force: true });
   }
 }
+
+export type Container = 'mp4' | 'mov' | 'mkv' | 'webm';
+
+/** A real short video in the given container (the formats the upload accepts). */
+export async function generateVideo(container: Container): Promise<Buffer> {
+  if (container === 'mp4') {
+    return generateMp4({ durationSeconds: 2, width: 160, height: 120 });
+  }
+  const output = join(
+    tmpdir(),
+    `streamtube-fixture-${randomUUID()}.${container}`,
+  );
+  const args =
+    container === 'webm'
+      ? ['-c:v', 'libvpx', '-f', 'webm']
+      : [
+          '-c:v',
+          'libx264',
+          '-pix_fmt',
+          'yuv420p',
+          '-f',
+          container === 'mov' ? 'mov' : 'matroska',
+        ];
+  try {
+    await execFileAsync('ffmpeg', [
+      '-v',
+      'error',
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'testsrc=duration=2:size=160x120:rate=10',
+      ...args,
+      output,
+    ]);
+    return await readFile(output);
+  } finally {
+    await rm(output, { force: true });
+  }
+}
