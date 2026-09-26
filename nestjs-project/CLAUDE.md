@@ -2,7 +2,9 @@
 
 ## Environment Startup Verification
 
-**Default behavior:** starting the environment means starting **only infrastructure services** (database, mail, etc.) — **never** start the NestJS application server unless the user explicitly asks to run/serve the project (e.g., "rode o projeto", "suba o servidor", "run the app").
+**Default behavior:** starting the environment means starting **only infrastructure services** (database, mail, Redis, MinIO and the video worker) — **never** start the NestJS API server unless the user explicitly asks to run/serve the project (e.g., "rode o projeto", "suba o servidor", "run the app").
+
+The `video-worker` is infrastructure: `docker compose up -d` starts it and it consumes the queue on its own (it is a separate process with no HTTP server). The rule above is about the API server (`npm run start:dev`), which keeps requiring an explicit request. Manual proofs that need the API running (e.g. the 10 GiB upload) count as an explicit request from the task that defines them, and the API must be stopped afterwards.
 
 After starting infrastructure, always confirm the containers are up before proceeding:
 
@@ -13,6 +15,9 @@ docker compose ps   # all services must show status "running"
 Then verify each infrastructure service is actually ready to accept connections — not just running:
 
 - **PostgreSQL:** `docker compose exec db pg_isready -U streamtube` — expect `accepting connections`
+- **Redis:** `docker compose exec redis redis-cli ping` — expect `PONG`
+- **MinIO:** `docker compose exec minio mc ready local` — expect `The cluster 'local' is ready`; the `minio-init` service creates the `videos` and `thumbnails` buckets and exits with code 0 (`docker compose ps -a` shows it as `Exited (0)`)
+- **Video worker:** `docker compose ps video-worker` shows it running, and `docker compose logs video-worker` shows the Nest application started with no errors
 
 Only start the NestJS dev server (`npm run start:dev`) when the user **explicitly** asks to run the application — never as part of "start the environment".
 
@@ -32,8 +37,13 @@ docker compose exec nestjs-api npm run start:dev
 ```
 
 Services:
-- `nestjs-api` — NestJS API, port `3000`
+- `nestjs-api` — NestJS API, port `3000` (idle container until you start the server)
+- `video-worker` — same image and code as the API, runs `npm run start:worker:dev` (queue consumer, no port)
 - `db` — PostgreSQL 17, port `5432`, database `streamtube`, user/password `streamtube`
+- `mailpit` — SMTP `1025` and web UI `8025`
+- `redis` — Redis 7 (AOF, `noeviction`), BullMQ broker, no published port
+- `minio` — S3-compatible storage, no published port (pinned `quay.io` image, development and tests only)
+- `minio-init` — one-shot job that creates the buckets; the API and the worker wait for it
 
 All verification and teardown commands run on the **host machine**:
 
@@ -62,11 +72,15 @@ docker compose down
 npm run start:dev                        # Dev server with hot-reload
 npm run build                            # Compile to dist/
 npm run start:prod                       # Run compiled build
+npm run start:worker                     # Video worker (dist/worker), no watch
+npm run start:worker:dev                 # Video worker with watch (what the Compose service runs)
+npm run openapi:export                   # Regenerate openapi.json (Nest CLI build, so the swagger plugin applies)
 
 npm test                                 # Unit tests
 npm run test:watch                       # Unit tests in watch mode
 npm run test:cov                         # Coverage report
-npm run test:e2e                         # End-to-end tests (always with --runInBand)
+npm run test:integration                 # Only the *.integration-spec.ts files, --runInBand
+npm run test:e2e                         # End-to-end tests (script already uses --runInBand)
 
 npx tsc --noEmit                         # Type-check (required before declaring a task done)
 npm run lint                             # ESLint with auto-fix
@@ -119,7 +133,9 @@ Conventions for **how to write** each kind of test (mocking patterns, AAA struct
 
 These settings are required in `package.json` (jest config) and `test/jest-e2e.json` for the project's tests to work correctly:
 
-- `setupFiles: ["dotenv/config"]` — without this, `.env` is not loaded inside the Jest process. `DB_HOST`, `JWT_SECRET`, etc. fall back to undefined or to the host's `localhost`, breaking container-to-container DNS.
+- `setupFiles: ["<rootDir>/../test/jest-setup-env.js", "dotenv/config"]` (the e2e config uses `<rootDir>/jest-setup-env.js`):
+  - `dotenv/config` — without it, `.env` is not loaded inside the Jest process. `DB_HOST`, `JWT_SECRET`, etc. fall back to undefined or to the host's `localhost`, breaking container-to-container DNS.
+  - `test/jest-setup-env.js` — runs first and sets `QUEUE_PREFIX=streamtube-test`, so tests never compete for jobs with the worker running in Compose (which uses the prefix `bull`).
 - `testRegex: '.*\\.(spec|integration-spec)\\.ts$'` — covers both unit (`*.spec.ts`) and integration (`*.integration-spec.ts`) suffixes.
 
 Do not add new test-file suffixes; if a new test type is needed, update the regex deliberately.
@@ -136,6 +152,8 @@ MAIL_FROM=StreamTube <noreply@streamtube.local>
 MAIL_FROM="StreamTube <noreply@streamtube.local>"
 ```
 
+New variables for storage (`STORAGE_*`), Redis (`REDIS_*`, `QUEUE_PREFIX`) and video processing (`VIDEO_*`) are documented in `.env.example`; the storage credentials are required and are also the MinIO root credentials in `compose.yaml`.
+
 Whenever possible, prefer storing only the bare address in `.env` and composing display names in code (e.g., in `mail.config.ts`) so the file stays shell-safe.
 
 ## Build Assets
@@ -148,6 +166,38 @@ NestJS with standard module structure. Source lives in `src/`, compiled output i
 
 - Each domain feature gets its own module (e.g., `UsersModule`, `VideosModule`) registered in `AppModule`
 - Controllers handle HTTP routing; Services hold business logic; both are scoped to their module
+- Two processes share this package: the API (`src/main.ts`, `AppModule`) and the video worker (`src/worker.ts`, `WorkerModule`, an application context with no HTTP). Shared pieces are extracted into modules both import: `appConfigModule` (`src/config/app-config.module.ts`), `DatabaseModule` (`src/database/database.module.ts`) and `VideosRepositoryModule` (`src/videos/videos-repository.module.ts`)
+
+### Video modules (Phase 03)
+
+- `src/videos/` — `VideosModule`: `VideosController` (`@ApiTags('videos')`), `VideoUploadsService` (upload session), `VideosService` (public metadata), `VideoStreamingService` (stream and download), `VideosRepository`, the `Video` entity, `VideoStatus` and helpers (`range.util.ts`, `filename.util.ts`, `public-id.util.ts`)
+- `src/storage/` — `StorageModule`/`StorageService`: the only place that talks to S3/MinIO (multipart, presigned URLs, ranged reads). Communication failures become `StorageUnavailableException` (502)
+- `src/queue/` — `QueueModule`: the BullMQ queues `video-processing`, `video-processing-dlq` and `video-maintenance` (names in `queue.constants.ts`) and `VideoProcessingPublisher` (`publish` and `republish`; the job id is the video id) `video-maintenance` keeps a day of finished jobs (`MAINTENANCE_JOB_OPTIONS`): the sweeper runs ~96 times a day and Redis runs with `noeviction`, so a queue without retention would fill it. Any new recurring job needs retention too.
+- `src/worker/` — `VideoProcessor` (consumes `video-processing`), `UploadsSweeperService`/`UploadsSweeperProcessor`/`UploadsSweeperScheduler` (every 15 minutes: aborts drafts abandoned for over 24 h and republishes the job of uploads completed for over 5 minutes that never left `draft`), and `media/` (`MediaProbeService`, `ThumbnailService`, both reading the source by presigned URL through ffprobe/ffmpeg)
+
+Endpoints (`VideosController`, `:public_id` is the 11-character public identifier):
+
+| Endpoint | Access | Purpose |
+|---|---|---|
+| `POST /videos` | authenticated | creates the draft and opens the multipart upload |
+| `GET /videos/{public_id}/upload` | owner | parts already stored (resume) |
+| `POST /videos/{public_id}/upload/parts` | owner | presigned URLs for up to 100 parts |
+| `POST /videos/{public_id}/upload/completion` | owner | validates and completes the upload, publishes the job (idempotent) |
+| `GET /videos/{public_id}` | public (`ready` only) | metadata |
+| `GET /videos/{public_id}/stream` | public (`ready` only) | streaming with `Range`/206 |
+| `GET /videos/{public_id}/download` | public (`ready` only) | file as an attachment |
+
+Video status and what it means: `draft` (rascunho — the upload is in progress or, with `upload_completed_at` set, waiting for the worker), `processing` (processando), `ready` (pronto), `error` (erro, with `error_code` `INVALID_MEDIA` or `PROCESSING_FAILED`). Transitions are conditional `UPDATE`s (`VideosRepository.transitionStatus`, `startProcessing`, `markUploadCompleted`).
+
+Things to keep in mind when changing these modules:
+
+- The worker throws transient errors so BullMQ retries them; only `InvalidMediaError` becomes a failure that skips the remaining attempts (`InvalidMediaJobFailure`, a subclass of `UnrecoverableError`, raised after the video was already set to `error`). BullMQ raises a plain `UnrecoverableError` by itself when a job stalls twice (worker killed in the middle of a file); the `failed` handler treats that one as an exhausted job (`PROCESSING_FAILED` + DLQ), and `bullmq-stalled-job.integration-spec.ts` pins that behaviour. The sweeper also re-queues videos left in `processing` with no run touching them for longer than twice the processing timeout plus 5 minutes. The "log and do not rethrow" rule for services applies only to the worker's event handler and the sweeper, never to `VideoProcessor.process`.
+- Stream and download return a `StreamableFile` and destroy the storage stream when the client closes the connection (`pipeStorageBody` in the controller); never buffer the file.
+- Errors that carry response headers (e.g. `Content-Range` on `INVALID_RANGE`) declare them on `DomainException.headers`, and the filter applies them.
+- The ThrottlerGuard from Phase 02 is global (10 requests per minute per IP) and applies to every route except `GET /` and the three public video reads (`GET /videos/{public_id}`, `/stream`, `/download`), which carry `@SkipThrottle()`: a player sends one Range request per seek and would get `429` within seconds. New public routes that a client calls repeatedly need the same opt-out; `test/videos-public-throttle.e2e-spec.ts` covers it.
+- Uploaded files are untrusted content. Every ffmpeg/ffprobe call on one must carry `SAFE_INPUT_OPTIONS` (`src/worker/media/media-tool.ts`): a demuxer whitelist (mp4, mov, mkv, webm) and an HTTP(S)-only protocol whitelist. Without it a playlist uploaded as `a.mp4` makes the worker fetch every URL it lists (SSRF); `media-probe`/`thumbnail` integration specs assert that an internal server receives no request. If the upload allowlist gains a container, add its demuxer to `ALLOWED_INPUT_FORMATS`.
+- `scripts/upload-large-video.mjs` is the manual 10 GiB upload proof (steps in `docs/phases/phase-03-videos/progress.md`, SI-03.18); run it in a container other than `nestjs-api`.
+- The e2e specs come from `specs/*.plan.md` (one per endpoint); helpers live in `test/helpers/` and `src/test/`.
 
 ## Code Conventions
 

@@ -10,7 +10,7 @@ More info in the project overview: [docs/project-plan.md](docs/project-plan.md)
 
 This is a monorepo with two main areas:
 
-- `nestjs-project/` — Backend API (NestJS 11, TypeScript, Express). Contains modules for users, channels, videos, comments, etc.
+- `nestjs-project/` — Backend (NestJS 11, TypeScript, Express). One package with two processes: the API (`src/main.ts`) and the video worker (`src/worker.ts`). Contains modules for users, channels, videos, storage and queue; comments and the other social modules come in later phases.
 - `docs/` — Project documentation, architecture diagrams, and planning.
 - `next-frontend/` (Next.js) — not yet initialized
 
@@ -18,19 +18,31 @@ This is a monorepo with two main areas:
 
 See `docs/diagrams/software-arch.mermaid` for the full diagram. Key containers:
 
-- **Frontend** (Next.js) → calls API via REST, streams from Object Storage
-- **API** (Nest.js) → business rules, auth, reads/writes DB, uploads to storage, publishes jobs to queue, sends emails
-- **Video Worker** (FFmpeg) → consumes jobs from queue, processes videos, updates DB and storage
+- **Frontend** (Next.js) → calls API via REST; watches videos through the API's streaming endpoint; sends video parts straight to Object Storage with presigned URLs
+- **API** (Nest.js) → business rules, auth, reads/writes DB, starts and completes multipart uploads (the video bytes never pass through it on upload), serves streaming and download from storage, publishes jobs to the queue, sends emails
+- **Video Worker** (FFmpeg, same Nest package, `src/worker.ts`) → consumes jobs from the queue, extracts metadata with ffprobe, generates the thumbnail with ffmpeg, updates DB and storage; also runs the scheduled clean-up of abandoned uploads
 - **Database** (PostgreSQL) → users, channels, videos, comments, likes
-- **Object Storage** (S3/MinIO) → video files and thumbnails
-- **Message Queue** (TBD) → video processing job queue
+- **Object Storage** (S3-compatible, MinIO in Docker) → video files (bucket `videos`) and thumbnails (bucket `thumbnails`)
+- **Message Queue** (BullMQ on Redis 7) → video processing job queue, its dead-letter queue and the maintenance queue
 - **Email Service** (SMTP) → account confirmation and password recovery
+
+## Video Upload and Processing
+
+Implemented in Phase 03 (`docs/phases/phase-03-videos/`); the decisions are in `docs/decisions/technical-decisions-phase-03-videos.md`.
+
+- **Upload (resumable multipart, up to 10 GiB):** `POST /videos` creates a `draft` in the authenticated user's channel and opens an S3 multipart upload; the client asks for presigned part URLs (`POST /videos/{public_id}/upload/parts`), sends each part with `PUT` **directly to the storage**, and confirms with `POST /videos/{public_id}/upload/completion`, which validates the parts, completes the multipart and publishes the job. `GET /videos/{public_id}/upload` lists the parts already stored, so an interrupted upload can resume. The API never receives the video bytes on upload.
+- **Processing:** the worker moves the video `draft` → `processing` → `ready` (or `error`), fills duration, size, codecs and metadata, and saves the thumbnail at `thumbnails/{video id}/default.jpg`. Transient failures are retried 3 times with exponential backoff, an invalid file goes straight to `error` (`INVALID_MEDIA`), and exhausted jobs go to the dead-letter queue (`PROCESSING_FAILED`). Every status change is a compare-and-set `UPDATE`.
+- **Reading:** `GET /videos/{public_id}` (metadata), `/stream` (Range/206) and `/download` are public and serve only `ready` videos; stream and download pass through the API as streams, never loaded into memory.
+- **Identifiers:** videos are addressed by `public_id` (11 URL-safe characters), never by the internal UUID. Storage keys use the UUID.
+- **Presigned URLs use the Compose host** (`http://minio:9000`), so parts can only be sent from inside the Docker network in this phase; a browser client will need `STORAGE_PUBLIC_ENDPOINT` and CORS on the storage (frontend phase).
+- **Queue and MinIO are real services** in `nestjs-project/compose.yaml`. The MinIO image is pinned to the last community release published on `quay.io` (never `latest`) and is for development and tests only.
+- **Dependencies to know:** `@nestjs/bullmq` is pinned to `^11` (12 is ESM-only and this project is CommonJS) and BullMQ needs `ioredis` installed as its Redis client. FFmpeg comes from the `apt` package in `Dockerfile.dev`.
 
 ## Docker Networking
 
 This project runs entirely in Docker containers. When configuring connections between services (database, cache, queue, etc.), **always use the Docker Compose service name** as the host — never `localhost` or `127.0.0.1`.
 
-Inside a container, `localhost` refers to the container itself, not the host machine or other containers. Services communicate through the Docker Compose network using their service names (e.g., `db`, `nestjs-api`).
+Inside a container, `localhost` refers to the container itself, not the host machine or other containers. Services communicate through the Docker Compose network using their service names (e.g., `db`, `redis`, `minio`, `mailpit`, `nestjs-api`).
 
 - **Correct:** `DB_HOST=db` (the Compose service name)
 - **Wrong:** `DB_HOST=localhost`
