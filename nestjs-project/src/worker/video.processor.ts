@@ -23,6 +23,7 @@ import {
 import { VideoStatus } from '../videos/video-status.enum';
 import { VideosRepository } from '../videos/videos.repository';
 import { redactUrls } from './media/media-tool';
+import { InvalidMediaJobFailure } from './video-processing.errors';
 import { MediaProbeService } from './media/media-probe.service';
 import { InvalidMediaError } from './media/media.errors';
 import type { MediaMetadata } from './media/media.types';
@@ -95,7 +96,7 @@ export class VideoProcessor
           VIDEO_ERROR_CODES.INVALID_MEDIA,
           error.message,
         );
-        throw new UnrecoverableError(error.message);
+        throw new InvalidMediaJobFailure(error.message);
       }
       throw error;
     }
@@ -138,11 +139,17 @@ export class VideoProcessor
     }
   }
 
-  // An UnrecoverableError already ended the video in `process`; every other
-  // failure is final only when it consumed the last attempt.
+  // `InvalidMediaJobFailure` already ended the video in `process`. Any other
+  // failure is final when it consumed the last attempt, or when BullMQ gave up
+  // on the job by itself (a job that stalled more often than allowed, e.g. a
+  // worker killed twice in the middle of a big file, fails with an
+  // `UnrecoverableError` although attempts are left): nobody recorded that one.
   private isExhausted(job: Job, error: Error): boolean {
+    if (error instanceof InvalidMediaJobFailure) {
+      return false;
+    }
     return (
-      !(error instanceof UnrecoverableError) &&
+      error instanceof UnrecoverableError ||
       job.attemptsMade >= (job.opts.attempts ?? 1)
     );
   }

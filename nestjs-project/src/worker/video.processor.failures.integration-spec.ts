@@ -1,7 +1,7 @@
 import { ListObjectsV2Command, type S3Client } from '@aws-sdk/client-s3';
 import { getQueueToken } from '@nestjs/bullmq';
 import { Test, type TestingModule } from '@nestjs/testing';
-import type { Queue } from 'bullmq';
+import { UnrecoverableError, type Job, type Queue } from 'bullmq';
 import { randomBytes } from 'node:crypto';
 import { DataSource } from 'typeorm';
 import { Channel } from '../channels/entities/channel.entity';
@@ -24,6 +24,7 @@ import { VideoStatus } from '../videos/video-status.enum';
 import { VideosRepository } from '../videos/videos.repository';
 import { MediaProbeService } from './media/media-probe.service';
 import { TransientMediaError } from './media/media.errors';
+import { VideoProcessor } from './video.processor';
 import { WorkerModule } from './worker.module';
 
 jest.setTimeout(120000);
@@ -242,5 +243,34 @@ describe('VideoProcessor failures (integration)', () => {
     expect(listed.Contents?.map((object) => object.Key)).toEqual([
       `${draft.id}/default.jpg`,
     ]);
+  });
+
+  it('should end in error and dead-letter a video whose job stalled out of attempts', async () => {
+    const draft = await createUploadedVideo(await generateMp4());
+    // what a worker killed twice in the middle of the file leaves behind
+    await videos.startProcessing(draft.id);
+    const stalledJob = {
+      data: { videoId: draft.id },
+      attemptsMade: 1,
+      opts: { attempts: 3 },
+    } as unknown as Job;
+
+    await module
+      .get(VideoProcessor)
+      .onFailed(
+        stalledJob,
+        new UnrecoverableError('job stalled more than allowable limit'),
+      );
+
+    const video = await load(draft.id);
+    expect(video.status).toBe(VideoStatus.ERROR);
+    expect(video.error_code).toBe('PROCESSING_FAILED');
+    expect(video.error_message).toBe('job stalled more than allowable limit');
+    const [dead] = await deadLetterQueue.getJobs(['waiting']);
+    expect(dead.data).toEqual({
+      videoId: draft.id,
+      failedReason: 'job stalled more than allowable limit',
+      attemptsMade: 1,
+    });
   });
 });

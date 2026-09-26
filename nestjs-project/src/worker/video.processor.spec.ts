@@ -10,6 +10,7 @@ import type { MediaProbeService } from './media/media-probe.service';
 import { InvalidMediaError, TransientMediaError } from './media/media.errors';
 import type { MediaMetadata } from './media/media.types';
 import type { ThumbnailService } from './media/thumbnail.service';
+import { InvalidMediaJobFailure } from './video-processing.errors';
 import { VideoProcessor } from './video.processor';
 
 const config: ConfigType<typeof videoConfig> = {
@@ -157,7 +158,7 @@ describe('VideoProcessor', () => {
         arrange();
 
         await expect(processor.process(makeJob())).rejects.toBeInstanceOf(
-          UnrecoverableError,
+          InvalidMediaJobFailure,
         );
 
         expect(repository.transitionStatus).toHaveBeenCalledWith(
@@ -228,6 +229,38 @@ describe('VideoProcessor', () => {
       );
 
       expect(deadLetterQueue.add).toHaveBeenCalledTimes(1);
+    });
+
+    it('should not act twice on an invalid file that process already ended in error', async () => {
+      await processor.onFailed(
+        makeJob({ attemptsMade: 1 }),
+        new InvalidMediaJobFailure('no video track'),
+      );
+
+      expect(repository.transitionStatus).not.toHaveBeenCalled();
+      expect(deadLetterQueue.add).not.toHaveBeenCalled();
+    });
+
+    it('should record a job that BullMQ gave up on after stalling, although attempts are left', async () => {
+      await processor.onFailed(
+        makeJob({ attemptsMade: 1, attempts: 3 }),
+        new UnrecoverableError('job stalled more than allowable limit'),
+      );
+
+      expect(repository.transitionStatus).toHaveBeenCalledWith(
+        'video-1',
+        [VideoStatus.PROCESSING, VideoStatus.DRAFT],
+        VideoStatus.ERROR,
+        {
+          error_code: 'PROCESSING_FAILED',
+          error_message: 'job stalled more than allowable limit',
+        },
+      );
+      expect(deadLetterQueue.add).toHaveBeenCalledWith('dead-lettered-video', {
+        videoId: 'video-1',
+        failedReason: 'job stalled more than allowable limit',
+        attemptsMade: 1,
+      });
     });
 
     it('should ignore an event without a job', async () => {

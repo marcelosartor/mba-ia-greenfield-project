@@ -161,6 +161,15 @@ export class VideosRepository {
     });
   }
 
+  /** Videos in `processing` that nothing has touched since before `before`. */
+  async findStuckProcessing(before: Date, limit: number): Promise<Video[]> {
+    return this.repository.find({
+      where: { status: VideoStatus.PROCESSING, updated_at: LessThan(before) },
+      order: { updated_at: 'ASC' },
+      take: limit,
+    });
+  }
+
   /**
    * Deletes a draft only while its upload is still incomplete, so a completion
    * that raced with the sweeper is never lost. Returns whether a row was

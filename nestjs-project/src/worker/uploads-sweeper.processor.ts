@@ -13,9 +13,13 @@ export class UploadsSweeperProcessor extends WorkerHost {
 
   async process(): Promise<void> {
     const result = await this.sweeper.run();
-    if (result.abandonedRemoved > 0 || result.jobsRepublished > 0) {
+    if (
+      result.abandonedRemoved > 0 ||
+      result.jobsRepublished > 0 ||
+      result.stuckRepublished > 0
+    ) {
       this.logger.log(
-        `Sweep done: ${result.abandonedRemoved} abandoned upload(s) removed, ${result.jobsRepublished} job(s) republished`,
+        `Sweep done: ${result.abandonedRemoved} abandoned upload(s) removed, ${result.jobsRepublished} job(s) republished, ${result.stuckRepublished} stuck video(s) re-queued`,
       );
     }
   }

@@ -399,4 +399,58 @@ describe('VideosRepository (integration)', () => {
       expect(await videoRepository.countBy({ id: completed.id })).toBe(1);
     });
   });
+
+  describe('stuck processing', () => {
+    const hoursAgo = (hours: number): Date =>
+      new Date(Date.now() - hours * 60 * 60 * 1000);
+    const backdateUpdate = (id: string, when: Date): Promise<unknown> =>
+      dataSource.query(
+        `UPDATE "videos" SET "updated_at" = $1 WHERE "id" = $2`,
+        [when, id],
+      );
+    const startProcessing = async (title: string) => {
+      const draft = await createDraft(title);
+      await repository.markUploadCompleted(draft.id);
+      await repository.startProcessing(draft.id);
+      return draft;
+    };
+
+    it('should find only videos in processing that were not touched since the limit', async () => {
+      const stuck = await startProcessing('stuck');
+      await startProcessing('running'); // updated just now
+      const readyOld = await startProcessing('ready');
+      await videoRepository.update(
+        { id: readyOld.id },
+        { status: VideoStatus.READY },
+      );
+      const draftOld = await createDraft('draft');
+      for (const video of [stuck, readyOld, draftOld]) {
+        await backdateUpdate(video.id, hoursAgo(3));
+      }
+
+      const found = await repository.findStuckProcessing(hoursAgo(1), 10);
+
+      expect(found.map((video) => video.id)).toEqual([stuck.id]);
+    });
+
+    it('should refresh updated_at every time processing starts, so a live run never looks stuck', async () => {
+      const video = await startProcessing('attempt');
+      await backdateUpdate(video.id, hoursAgo(3));
+
+      await repository.startProcessing(video.id); // the next attempt
+
+      expect(await repository.findStuckProcessing(hoursAgo(1), 10)).toEqual([]);
+    });
+
+    it('should respect the batch limit, oldest first', async () => {
+      const older = await startProcessing('older');
+      const newer = await startProcessing('newer');
+      await backdateUpdate(older.id, hoursAgo(5));
+      await backdateUpdate(newer.id, hoursAgo(4));
+
+      const found = await repository.findStuckProcessing(hoursAgo(1), 1);
+
+      expect(found.map((video) => video.id)).toEqual([older.id]);
+    });
+  });
 });
