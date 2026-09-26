@@ -5,6 +5,7 @@ import {
   ChannelNotFoundException,
   UnsupportedVideoFormatException,
   UploadAlreadyCompletedException,
+  InvalidPartNumberException,
   UploadIncompleteException,
   VideoAccessDeniedException,
   VideoNotFoundException,
@@ -26,6 +27,7 @@ import {
   UPLOAD_URL_EXPIRATION_SECONDS,
   VIDEO_FORMATS,
 } from './video-upload.constants';
+import { expectedPartLength, partCountFor } from './upload-parts.util';
 import { VideosRepository } from './videos.repository';
 import type { InitiatedUpload } from './videos.types';
 
@@ -74,6 +76,7 @@ export class VideoUploadsService {
       channelId: channel.id,
       title: this.deriveTitle(dto.filename),
       extension,
+      declaredSizeBytes: dto.size_bytes,
     });
 
     let uploadId: string | undefined;
@@ -92,7 +95,7 @@ export class VideoUploadsService {
       public_id: draft.public_id,
       status: draft.status,
       part_size_bytes: this.config.partSizeBytes,
-      part_count: Math.ceil(dto.size_bytes / this.config.partSizeBytes),
+      part_count: partCountFor(dto.size_bytes, this.config.partSizeBytes),
     };
   }
 
@@ -134,6 +137,18 @@ export class VideoUploadsService {
       throw new Error(`Video ${video.id} has no open multipart upload`);
     }
 
+    // The declared size fixes how many parts exist and how long each one is;
+    // signing that length keeps the storage from accepting more than declared.
+    // Only drafts created before the size was recorded have no such bound.
+    const declared = video.declared_size_bytes;
+    const partSize = this.config.partSizeBytes;
+    if (
+      declared !== null &&
+      dto.part_numbers.some((n) => n > partCountFor(declared, partSize))
+    ) {
+      throw new InvalidPartNumberException();
+    }
+
     const parts = await Promise.all(
       dto.part_numbers.map(async (partNumber) => ({
         part_number: partNumber,
@@ -142,6 +157,9 @@ export class VideoUploadsService {
           uploadId,
           partNumber,
           UPLOAD_URL_EXPIRATION_SECONDS,
+          declared === null
+            ? undefined
+            : expectedPartLength(declared, partSize, partNumber),
         ),
       })),
     );
@@ -224,8 +242,18 @@ export class VideoUploadsService {
 
     const sorted = [...parts].sort((a, b) => a.partNumber - b.partNumber);
     const lastIndex = sorted.length - 1;
+    // What was declared must be what arrived: as many parts as the size needs
+    // and exactly that many bytes (a missing last part would otherwise
+    // complete a truncated file). Drafts without a declared size keep the
+    // sequence check only.
+    const declared = video.declared_size_bytes;
+    const matchesDeclared =
+      declared === null ||
+      (sorted.length === partCountFor(declared, this.config.partSizeBytes) &&
+        totalBytes === declared);
     const valid =
       sorted.length > 0 &&
+      matchesDeclared &&
       sorted.every(
         (part, index) =>
           part.partNumber === index + 1 &&

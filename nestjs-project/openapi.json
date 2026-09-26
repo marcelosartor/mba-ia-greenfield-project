@@ -687,7 +687,7 @@
             }
           },
           "400": {
-            "description": "Validation failed",
+            "description": "Validation failed, or a part number beyond the parts of the declared size (INVALID_PART_NUMBER)",
             "content": {
               "application/json": {
                 "schema": {

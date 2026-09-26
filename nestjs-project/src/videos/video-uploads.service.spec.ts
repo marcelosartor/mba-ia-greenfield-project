@@ -5,6 +5,7 @@ import {
   ChannelNotFoundException,
   StorageUnavailableException,
   UnsupportedVideoFormatException,
+  InvalidPartNumberException,
   UploadAlreadyCompletedException,
   UploadIncompleteException,
   VideoAccessDeniedException,
@@ -98,6 +99,7 @@ describe('VideoUploadsService', () => {
         channelId: 'channel-1',
         title: 'My Holiday',
         extension: 'mp4',
+        declaredSizeBytes: 200_000_000,
       });
       expect(storageService.createMultipartUpload).toHaveBeenCalledWith(
         draft.video_key,
@@ -236,6 +238,7 @@ describe('VideoUploadsService', () => {
       channel_id: 'channel-1',
       upload_id: 'upload-1',
       upload_completed_at: null,
+      declared_size_bytes: null,
     } as Video;
 
     beforeEach(() => {
@@ -324,6 +327,7 @@ describe('VideoUploadsService', () => {
       channel_id: 'channel-1',
       upload_id: 'upload-1',
       upload_completed_at: null,
+      declared_size_bytes: null,
     } as Video;
 
     beforeEach(() => {
@@ -340,12 +344,14 @@ describe('VideoUploadsService', () => {
         'upload-1',
         1,
         3600,
+        undefined,
       );
       expect(storageService.presignUploadPart).toHaveBeenCalledWith(
         ownedVideo.video_key,
         'upload-1',
         2,
         3600,
+        undefined,
       );
       expect(result).toEqual({
         parts: [
@@ -353,6 +359,51 @@ describe('VideoUploadsService', () => {
           { part_number: 2, url: 'https://minio/part-2' },
         ],
         expires_in: 3600,
+      });
+    });
+
+    describe('with a declared size', () => {
+      const PART = 64 * 1024 * 1024;
+      // 2 full parts and a last one of 1000 bytes
+      const declaredVideo = {
+        ...ownedVideo,
+        declared_size_bytes: 2 * PART + 1000,
+      } as Video;
+
+      beforeEach(() => {
+        videosRepository.findByPublicId.mockResolvedValue(declaredVideo);
+      });
+
+      it('should sign the exact length of each part, the last one carrying the rest', async () => {
+        await service.requestPartUrls('user-1', 'abcdefghijk', {
+          part_numbers: [1, 2, 3],
+        });
+
+        const lengths = (
+          storageService.presignUploadPart.mock.calls as unknown[][]
+        ).map((call) => [call[2], call[4]]);
+        expect(lengths).toEqual([
+          [1, PART],
+          [2, PART],
+          [3, 1000],
+        ]);
+      });
+
+      it('should refuse a part number beyond the parts of the declared size', async () => {
+        await expect(
+          service.requestPartUrls('user-1', 'abcdefghijk', {
+            part_numbers: [1, 4],
+          }),
+        ).rejects.toBeInstanceOf(InvalidPartNumberException);
+        expect(storageService.presignUploadPart).not.toHaveBeenCalled();
+      });
+
+      it('should accept the last part number exactly', async () => {
+        await expect(
+          service.requestPartUrls('user-1', 'abcdefghijk', {
+            part_numbers: [3],
+          }),
+        ).resolves.toBeDefined();
       });
     });
 
@@ -405,6 +456,7 @@ describe('VideoUploadsService', () => {
       channel_id: 'channel-1',
       upload_id: 'upload-1',
       upload_completed_at: null,
+      declared_size_bytes: null,
     } as Video;
     const part = (partNumber: number, sizeBytes = PART) => ({
       partNumber,
@@ -476,6 +528,44 @@ describe('VideoUploadsService', () => {
       const [, , completed] = storageService.completeMultipartUpload.mock
         .calls[0] as [string, string, { partNumber: number }[]];
       expect(completed.map((p) => p.partNumber)).toEqual([1, 2]);
+    });
+
+    describe('with a declared size', () => {
+      const declaredVideo = {
+        ...openVideo,
+        declared_size_bytes: 2 * PART + 1000,
+      } as Video;
+
+      beforeEach(() => {
+        videosRepository.findByPublicId.mockResolvedValue(declaredVideo);
+      });
+
+      it('should complete when the parts add up to the declared size', async () => {
+        await expect(
+          service.completeUpload('user-1', 'abcdefghijk'),
+        ).resolves.toMatchObject({ upload_completed: true });
+      });
+
+      it('should refuse a truncated upload whose last part never arrived', async () => {
+        storageService.listParts.mockResolvedValue([part(1), part(2)]);
+
+        await expect(
+          service.completeUpload('user-1', 'abcdefghijk'),
+        ).rejects.toBeInstanceOf(UploadIncompleteException);
+        expect(storageService.completeMultipartUpload).not.toHaveBeenCalled();
+      });
+
+      it('should refuse parts that add up to more than the declared size', async () => {
+        storageService.listParts.mockResolvedValue([
+          part(1),
+          part(2),
+          part(3, 5000),
+        ]);
+
+        await expect(
+          service.completeUpload('user-1', 'abcdefghijk'),
+        ).rejects.toBeInstanceOf(UploadIncompleteException);
+      });
     });
 
     it('should be idempotent once the upload is already completed', async () => {

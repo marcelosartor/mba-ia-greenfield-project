@@ -74,6 +74,7 @@ describe('UploadsSweeperService (integration)', () => {
       channelId: channel.id,
       title: 'Sweep me',
       extension: 'mp4',
+      declaredSizeBytes: 1_000,
     });
     const uploadId = await storage.createMultipartUpload(
       draft.video_key,
@@ -200,6 +201,7 @@ describe('UploadsSweeperService (integration)', () => {
         channelId: channel.id,
         title: 'Completed',
         extension: 'mp4',
+        declaredSizeBytes: 1_000,
       });
       await videos.markUploadCompleted(draft.id);
       await backdate(draft.id, 'upload_completed_at', ago(completedAgoMs));

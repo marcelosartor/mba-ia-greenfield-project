@@ -104,6 +104,7 @@ describe('VideoProcessor failures (integration)', () => {
       channelId: channel.id,
       title: 'Failing',
       extension: 'mp4',
+      declaredSizeBytes: 1_000,
     });
     await storage.putObject(
       storage.videosBucket,
