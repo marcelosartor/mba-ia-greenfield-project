@@ -10,7 +10,7 @@ Permitir que o dono edite nickname, nome e descrição do canal, e expor uma pá
 - A listagem pública só mostra vídeos publicados e públicos (PRD 04). Vídeo não listado nunca aparece.
 - As rotas públicas precisam ficar fora do limite global de 10 requisições por minuto, como as de leitura de vídeo (lição da Fase 03).
 
-- **Decidido** (PRD 00, decisões 12, 14, 15, 16 e 17): rotas `PATCH /channels/me`, `GET /channels/{nickname}` e `GET /channels/{nickname}/videos`; nickname `^[a-z0-9_]{3,50}$` com reservados, unicidade pelo `UNIQUE`, e a troca muda o endereço sem redirecionamento; o canal público expõe `name`, `nickname`, `description`, `created_at` e `video_count`; throttler nomeado `public-read` nas rotas públicas.
+- **Decidido** (PRD 00, decisões 12, 14, 15, 16 e 17): rotas `PATCH /channels/me`, `GET /channels/{nickname}` e `GET /channels/{nickname}/videos`; nickname `^[a-z0-9_]{3,50}$` com reservados, unicidade pelo `UNIQUE`, e a troca muda o endereço sem redirecionamento; o canal público expõe `name`, `nickname`, `description`, `created_at` e `video_count`; throttler nomeado `public-read` nas rotas públicas. O cadastro também evita nicknames reservados, e as rotas públicas aceitam qualquer nickname já gravado (legado curto ou reservado).
 ## Requisitos
 1. O dono edita nickname, nome e descrição do próprio canal (parcialmente); só ele.
 2. Nickname respeita formato e tamanho definidos e é único; conflito retorna 409 sem alterar nada, inclusive sob concorrência.
