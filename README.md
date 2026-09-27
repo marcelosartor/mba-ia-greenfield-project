@@ -42,12 +42,12 @@ Contém os fundamentos visuais do StreamTube — tokens (cores, tipografia, espa
 O projeto é um monorepo baseado em containers Docker. Cada subprojeto sobe sua própria stack via `docker compose`.
 
 - **Frontend** (Next.js 16, App Router + React Server Components) — interface da plataforma. Segue o **modelo BFF**: o navegador nunca chama a API NestJS diretamente; todo tráfego passa por Route Handlers same-origin em `app/api/**`, que fazem proxy server-side para a API.
-- **API** (NestJS 11) — regras de negócio, autenticação (JWT + refresh token rotation), envio de e-mails e acesso ao banco.
-- **Database** (PostgreSQL 17) — usuários, canais e tokens de autenticação.
+- **API** (NestJS 11) — regras de negócio, autenticação (JWT + refresh token rotation), envio de e-mails e acesso ao banco. Inicia e conclui os uploads multipart de vídeo (os bytes vão direto ao storage por URLs pré-assinadas, nunca passam pela API), publica os jobs na fila e serve streaming (Range/206) e download.
+- **Database** (PostgreSQL 17) — usuários, canais, tokens de autenticação e vídeos.
 - **Email Service** (Mailpit) — captura os e-mails transacionais (confirmação de conta e recuperação de senha) em uma UI local.
-- **Video Worker** (FFmpeg) — processamento de vídeos *(planejado — Fase 03)*.
-- **Object Storage** (S3/MinIO) — arquivos de vídeo e thumbnails *(planejado — Fase 03)*.
-- **Message Queue** — fila de processamento de vídeos *(planejado — Fase 03)*.
+- **Video Worker** (FFmpeg) — mesmo pacote NestJS, processo próprio (`src/worker.ts`): extrai duração e metadados com ffprobe, gera a thumbnail com ffmpeg e limpa uploads abandonados.
+- **Object Storage** (S3-compatível, MinIO no Docker) — buckets `videos` e `thumbnails`.
+- **Message Queue** (BullMQ sobre Redis 7) — fila de processamento de vídeos, sua dead-letter queue e a fila de manutenção.
 
 O diagrama de arquitetura completo (C4) está em `docs/diagrams/software-arch.mermaid`.
 
@@ -55,12 +55,16 @@ O diagrama de arquitetura completo (C4) está em `docs/diagrams/software-arch.me
 
 Os dois subprojetos têm stacks Docker **separadas**. Suba primeiro o backend, rode as migrations e depois o frontend.
 
-### 1. Backend (NestJS + PostgreSQL + Mailpit)
+### 1. Backend (NestJS + PostgreSQL + Mailpit + MinIO + Redis + worker de vídeo)
 
 ```bash
 cd nestjs-project
 
-# Sobe API, banco e Mailpit
+# Cria o .env a partir do exemplo (obrigatório — sem ele as credenciais do MinIO
+# ficam em branco e o minio-init falha)
+cp .env.example .env
+
+# Sobe API, banco, Mailpit, MinIO (com os buckets), Redis e o worker de vídeo
 docker compose up -d
 
 # Instala dependências (apenas na primeira vez)
@@ -81,6 +85,8 @@ Serviços disponíveis:
 | PostgreSQL | `localhost:5432` (db/user/senha: `streamtube`) |
 | Mailpit (UI de e-mails) | http://localhost:8025 |
 | Swagger (opcional) | http://localhost:3000/api/docs — habilite com `SWAGGER_ENABLED=true` |
+
+MinIO, Redis e o `video-worker` não publicam portas no host: são acessados só pela rede do Compose. O `video-worker` reinicia até o `npm install` terminar e, a partir daí, consome a fila sozinho.
 
 ### 2. Frontend (Next.js)
 
@@ -110,7 +116,7 @@ docker compose exec nestjs-api npm run test:e2e       # end-to-end (HTTP via sup
 docker compose exec nestjs-api npm run test:cov       # cobertura
 ```
 
-Sufixos: `*.spec.ts` (unitário), `*.integration-spec.ts` (integração com banco real), `*.e2e-spec.ts` (end-to-end). Testes de integração/e2e rodam com `--runInBand`.
+Sufixos: `*.spec.ts` (unitário), `*.integration-spec.ts` (integração com banco real), `*.e2e-spec.ts` (end-to-end). Os testes de integração e e2e usam os serviços reais do Compose (PostgreSQL, Redis, MinIO e FFmpeg) e rodam com `--runInBand`.
 
 ### Frontend (Vitest + Playwright)
 
@@ -169,11 +175,16 @@ green-field-ia-project/
 │   │   ├── users/                       # Entidade e serviço de usuários
 │   │   ├── channels/                    # Canal 1:1 por usuário (nickname do e-mail)
 │   │   ├── mail/                        # Envio de e-mails (templates Handlebars)
+│   │   ├── videos/                      # Upload multipart, metadados, streaming e download
+│   │   ├── storage/                     # Acesso ao object storage (S3/MinIO)
+│   │   ├── queue/                       # Filas BullMQ (processamento, DLQ, manutenção)
+│   │   ├── worker/                      # Processamento de vídeo (ffprobe/ffmpeg) e limpeza de uploads
+│   │   ├── worker.ts                    # Entrypoint do worker de vídeo
 │   │   ├── common/                      # Filtros, pipes e exceptions de domínio
 │   │   ├── config/                      # Configs namespaced (Joi)
 │   │   └── database/                    # data-source, migrations e seeds
 │   ├── test/                            # Testes e2e
-│   ├── compose.yaml                     # Docker Compose (API + PostgreSQL + Mailpit)
+│   ├── compose.yaml                     # Docker Compose (API, worker, PostgreSQL, Mailpit, MinIO, Redis)
 │   └── Dockerfile.dev
 ├── next-frontend/                       # Frontend (Next.js 16, App Router)
 │   ├── app/                             # Rotas, layouts, páginas e Route Handlers BFF
@@ -195,7 +206,7 @@ green-field-ia-project/
 |------|-----------|--------|
 | **01** | Configuração Base do Projeto | ✅ Concluída |
 | **02** | Cadastro, Login e Gerenciamento de Conta | ✅ Concluída |
-| **03** | Upload e Processamento de Vídeos | ⏳ Planejada |
+| **03** | Upload e Processamento de Vídeos | ✅ Concluída |
 | **04** | Gerenciamento de Vídeos e Canal | ⏳ Planejada |
 | **05** | Página de Visualização do Vídeo | ⏳ Planejada |
 | **06** | Interações Sociais (Likes, Comentários, Inscrições) | ⏳ Planejada |
@@ -208,8 +219,11 @@ Detalhes completos em `docs/project-plan.md`.
 | Camada | Tecnologia |
 |--------|------------|
 | Frontend | Next.js 16, React 19, TypeScript, Tailwind CSS 4, shadcn/ui, React Hook Form + Zod, iron-session, openapi-fetch |
-| Backend | NestJS 11, TypeScript, TypeORM, JWT, Argon2, Mailer (Handlebars) |
+| Backend | NestJS 11, TypeScript, TypeORM, JWT, Argon2, Mailer (Handlebars), AWS SDK v3 (S3), BullMQ |
 | Banco de Dados | PostgreSQL 17 |
+| Object Storage (dev) | MinIO |
+| Fila | BullMQ sobre Redis 7 |
+| Processamento de vídeo | FFmpeg (ffprobe/ffmpeg) |
 | E-mail (dev) | Mailpit |
 | Containerização | Docker, Docker Compose |
 | Testes | Jest, Supertest (backend); Vitest, MSW, Playwright (frontend) |
