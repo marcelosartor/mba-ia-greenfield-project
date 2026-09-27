@@ -1,7 +1,7 @@
 ---
 scope_type: phase
 related_phases: [4]
-status: pending
+status: decided
 date: 2026-09-26
 scope_description: "Backend for video and channel management: publication and visibility model, access to unpublished videos, categories, video edit contract, custom thumbnail, channel edit and public channel page, listing contract and query strategy, and rate limiting of the new routes."
 ---
@@ -174,7 +174,7 @@ _Subprojects in scope:_
 
 **Recommendation:** **Option A** — the owner is the only writer of these fields, the worker touches different columns (TD-01), and the extra cost of Option C would fire on worker writes.
 
-**Decision:** _[pending]_
+**Decision:** A (_owner, /plan-resolve 2026-09-27_). `PATCH` with no editable field (`{}`) → `400`; last write wins, no version check; the response returns the updated resource with `updated_at`.
 
 ---
 
@@ -233,7 +233,7 @@ _Subprojects in scope:_
 
 **Recommendation:** **Option A** — reuses FFmpeg (already a hard dependency) and its demuxer-restriction practice; the pixel cap (the recommendation is a cap around 16 megapixels, tunable) plus `-max_alloc` and a few-second timeout close the decompression-bomb case shown in fact 6. Choose B only if the team prefers a library over a process boundary.
 
-**Decision:** _[pending]_
+**Decision:** A (_owner, /plan-resolve 2026-09-27_). FFmpeg via `execFile` on stdin/stdout: magic-byte sniffing picks `jpeg_pipe`, `png_pipe` or `webp_pipe` (anything else → `415 INVALID_IMAGE`); width and height read from the header and rejected above a pixel cap (~16 megapixels, configurable) before decoding; `-max_alloc` and a timeout of a few seconds; first frame only, re-encoded as a 640 px wide JPEG. Animated WebP is rejected (`INVALID_IMAGE`). No new dependency.
 
 ---
 
@@ -322,7 +322,7 @@ _Subprojects in scope:_
 
 **Recommendation:** **Option A** — correct by construction; revisit B only with measured cost.
 
-**Decision:** _[pending]_
+**Decision:** A (_owner, /plan-resolve 2026-09-27_). Composite index `(channel_id, created_at DESC, id DESC)` for the panel and partial index `(channel_id, published_at DESC, id DESC) WHERE published_at IS NOT NULL AND visibility = 'public'` for the public list and `video_count`; `video_count` is a `COUNT(*)` on the same listable predicate (no denormalised column, no cache); category by join, thumbnail URL computed from `public_id`; one query per page, no N+1.
 
 ---
 
@@ -363,10 +363,10 @@ _Subprojects in scope:_
 | TD-02 | Cross-layer | Access to Unpublished Videos — Optional Auth, Precedence, Cache | A (`@OptionalAuth()` in the global guard) | A (owner, PRD 00) |
 | TD-03 | Backend | Video Categories Storage | A (`categories` table) | A (owner, PRD 00) |
 | TD-04 | Cross-layer | Video Edit Contract and Read Contract | A (partial `PATCH`) | A (owner, PRD 00) |
-| TD-05 | Cross-layer | Empty `PATCH` Body and Concurrent Edits | A (`{}` → 400, last write wins) | _[pending]_ |
+| TD-05 | Cross-layer | Empty `PATCH` Body and Concurrent Edits | A (`{}` → 400, last write wins) | A (owner, /plan-resolve) |
 | TD-06 | Cross-layer | Custom Thumbnail — Upload Path, Storage, Serving | A (multipart through the API) | A (owner, PRD 00) |
-| TD-07 | Backend | Custom Thumbnail — Content Validation and Normalisation | A (FFmpeg on a pipe + pixel cap) | _[pending]_ |
+| TD-07 | Backend | Custom Thumbnail — Content Validation and Normalisation | A (FFmpeg on a pipe + pixel cap) | A (owner, /plan-resolve) |
 | TD-08 | Backend | Channel Edit, Nickname Rules, Public Channel Page | A (nickname is the address) | A (owner, PRD 00) + sign-up avoids reserved nicknames (owner) |
 | TD-09 | Cross-layer | Listing Contract — Pagination, Ordering, Panel Counters | A (offset `page`/`limit`) | A (owner, PRD 00) |
-| TD-10 | Backend | Listing Query Strategy — Indexes and `video_count` | A (partial indexes + `COUNT`) | _[pending]_ |
+| TD-10 | Backend | Listing Query Strategy — Indexes and `video_count` | A (partial indexes + `COUNT`) | A (owner, /plan-resolve) |
 | TD-11 | Backend | Rate Limiting of the New Routes | A (named throttlers with `skipIf`) | A (owner, PRD 00) |

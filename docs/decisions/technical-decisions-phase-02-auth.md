@@ -238,6 +238,9 @@ _Subprojects in scope:_
 
 **Decision:** A (@nestjs/throttler)
 
+**Revisions:**
+- 2026-09-27 — Phase 04 (`phase-04-gerenciamento/TD-11`) replaces the single 10/min-per-IP throttler with named throttlers selected per route class through `skipIf`: `public-read` 300/min per IP (`THROTTLE_PUBLIC_READ_LIMIT`), `authenticated` 120/min per user, a stricter 20/min per user for the Phase 03 upload routes and the thumbnail `PUT`/`DELETE`, and `default` 10/min per IP kept only on sign-up, login and reset; still `@nestjs/throttler`, in memory. Rationale: Parâmetros ampliados pela política de rotas da Fase 04.
+
 ---
 
 ## TD-09: Refresh Token Format
@@ -298,6 +301,9 @@ _Subprojects in scope:_
 **Recommendation:** **Option A** — The platform is a video sharing service with URL-based channel handles. A strict `[a-z0-9_]` allowlist is the simplest and most portable choice: no extra dependencies, no edge cases around hyphen positioning, and the `user_<random>` fallback provides a valid handle even for extreme email prefixes. Hyphens can always be added in a future iteration if user feedback justifies it.
 
 **Decision:** A — `[a-z0-9_]` allowlist with `user_<8-char-random>` fallback when the prefix yields an empty string.
+
+**Revisions:**
+- 2026-09-27 — Phase 04 (`phase-04-gerenciamento/TD-08`) makes nicknames `^[a-z0-9_]{3,50}$` on edit, with reserved words (`me`, `admin`, `api`, `channels`, `videos`, `categories`, `auth`, `docs`, `support`); generation at sign-up avoids reserved words and names shorter than 3 characters; the public read still accepts legacy nicknames. Rationale: Regra endurecida pela política de nickname da Fase 04.
 
 ---
 
