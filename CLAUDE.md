@@ -8,11 +8,11 @@ More info in the project overview: [docs/project-plan.md](docs/project-plan.md)
 
 ## Repository Structure
 
-This is a monorepo with two main areas:
+This is a monorepo with three main areas:
 
 - `nestjs-project/` — Backend (NestJS 11, TypeScript, Express). One package with two processes: the API (`src/main.ts`) and the video worker (`src/worker.ts`). Contains modules for users, channels, categories, videos, storage, queue and throttling; comments and the other social modules come in later phases.
 - `docs/` — Project documentation, architecture diagrams, and planning.
-- `next-frontend/` (Next.js) — not yet initialized
+- `next-frontend/` — Frontend (Next.js 16, App Router, BFF model) from Phases 01–02: the sign-up, login and forgot-password screens (`app/(auth)/`) and the auth Route Handlers that proxy the API (`app/api/auth/`). It has its own `CLAUDE.md` and Compose stack. The video phases (03 onwards) are backend-only: their UI is out of scope.
 
 ## Architecture (C4 Container Diagram)
 
@@ -40,7 +40,7 @@ Implemented in Phase 03 (`docs/phases/phase-03-videos/`); the decisions are in `
 
 ## Video and Channel Management
 
-Implemented in Phase 04 (`docs/phases/phase-04-gerenciamento/`); the decisions are in `docs/decisions/technical-decisions-phase-04-gerenciamento.md`. The management panel and the public channel page are delivered as API only: the UI is not part of the project specification.
+Implemented in Phase 04 (`docs/phases/phase-04-gerenciamento/`); the decisions are in `docs/decisions/technical-decisions-phase-04-gerenciamento.md`. The management panel and the public channel page are delivered as API only: like Phase 03, this phase is backend-only and its UI is out of scope.
 
 - **Publication is separate from processing:** `videos.published_at` (null = editorial draft) and `videos.visibility` (`public` | `unlisted`); only a `ready` video can be published (`CHK_videos_published_ready`). `POST /videos/{public_id}/publication` publishes (`public` by default, writes `published_at = now()` on every call) and `DELETE` unpublishes. A video is **listable** when `published_at IS NOT NULL AND visibility = 'public'`, defined once in `VideosRepository` (`whereListable`).
 - **Reads by publication:** metadata, `stream`, `download` and `thumbnail` are `@OptionalAuth()`: a published video is readable by anyone; a draft only by the owner of its channel. Order: draft asked by anyone else → `404 VIDEO_NOT_FOUND`; then not `ready` → `409 VIDEO_NOT_READY`. Answers carry `Cache-Control: private, no-cache`. The token is read only from the `Authorization` header; a missing, invalid or expired token is anonymous.
