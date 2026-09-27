@@ -88,3 +88,31 @@ target_file: test/videos-stream.e2e-spec.ts
   2. API-caller envia `GET /videos/{public_id}/stream` sem `Range` e consome o corpo em stream, calculando o SHA-256 sem acumular os bytes
     - expect: status `200` e o SHA-256 igual ao do objeto original
     - expect: o aumento de `heapUsed` entre o início e o fim da requisição é inferior a 52428800 bytes (50 MiB)
+
+#### 1.7. busca-em-qualquer-ponto-do-arquivo
+
+**Source:** manual
+**Last sync:** 2026-09-27T14:58:10Z
+
+**Steps:**
+  1. API-caller envia `GET /videos/{public_id}/stream` de um vídeo publicado com `Range: bytes=3144728-` (os últimos 1000 bytes; regressão da SI-03.15)
+    - expect: status `206` com `Content-Range` igual a `bytes 3144728-3145727/3145728`
+    - expect: o SHA-256 do corpo é igual ao dos últimos 1000 bytes do objeto
+
+#### 1.8. ignora-range-com-mais-de-um-intervalo
+
+**Source:** manual
+**Last sync:** 2026-09-27T14:58:10Z
+
+**Steps:**
+  1. API-caller envia `GET /videos/{public_id}/stream` de um vídeo publicado com `Range: bytes=0-10,20-30` (regressão da SI-03.15)
+    - expect: status `200` com `Content-Length` igual a `3145728`
+
+#### 1.9. para-de-ler-o-storage-quando-o-cliente-sai
+
+**Source:** manual
+**Last sync:** 2026-09-27T14:58:10Z
+
+**Steps:**
+  1. API-caller abre `GET /videos/{public_id}/stream` de um vídeo publicado de 40 MiB e fecha a conexão ao receber o primeiro bloco (regressão da SI-03.15)
+    - expect: o stream de leitura do storage é destruído em até 10 segundos

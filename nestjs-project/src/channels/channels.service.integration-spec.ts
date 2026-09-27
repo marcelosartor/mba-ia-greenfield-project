@@ -1,4 +1,5 @@
 import { DataSource, Repository } from 'typeorm';
+import { Category } from '../categories/entities/category.entity';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { VerificationToken } from '../auth/entities/verification-token.entity';
 import {
@@ -6,11 +7,23 @@ import {
   createTestDataSource,
 } from '../test/create-test-data-source';
 import { User } from '../users/entities/user.entity';
+import {
+  ChannelNotFoundException,
+  NicknameAlreadyExistsException,
+} from '../common/exceptions/domain.exception';
 import { ChannelsService } from './channels.service';
+import { NICKNAME_PATTERN } from './nickname.util';
 import { Channel } from './entities/channel.entity';
 import { Video } from '../videos/entities/video.entity';
 
-const ALL_ENTITIES = [User, Channel, RefreshToken, VerificationToken, Video];
+const ALL_ENTITIES = [
+  User,
+  Channel,
+  RefreshToken,
+  VerificationToken,
+  Video,
+  Category,
+];
 
 describe('ChannelsService (integration)', () => {
   let dataSource: DataSource;
@@ -89,6 +102,19 @@ describe('ChannelsService (integration)', () => {
       const channels = await channelRepository.find();
       expect(channels).toHaveLength(2);
     });
+
+    it('avoids a reserved nickname generated from the email prefix', async () => {
+      const user = await createUser();
+
+      const channel = await channelsService.createChannel(
+        user.id,
+        'admin@exemplo.com',
+      );
+
+      expect(channel.nickname).not.toBe('admin');
+      expect(channel.nickname).toMatch(/^admin_[a-z0-9]{3}$/);
+      expect(NICKNAME_PATTERN.test(channel.nickname)).toBe(true);
+    });
   });
 
   describe('findByUserId', () => {
@@ -108,6 +134,48 @@ describe('ChannelsService (integration)', () => {
       const user = await createUser();
 
       expect(await channelsService.findByUserId(user.id)).toBeNull();
+    });
+  });
+
+  describe('updateOwn', () => {
+    it('lets exactly one of two concurrent changes to the same nickname win', async () => {
+      const [first, second] = [await createUser(), await createUser()];
+      await channelsService.createChannel(first.id, 'first@example.com');
+      await channelsService.createChannel(second.id, 'second@example.com');
+
+      const results = await Promise.allSettled([
+        channelsService.updateOwn(first.id, { nickname: 'disputado' }),
+        channelsService.updateOwn(second.id, { nickname: 'disputado' }),
+      ]);
+
+      const fulfilled = results.filter((r) => r.status === 'fulfilled');
+      const rejected = results.filter(
+        (r): r is PromiseRejectedResult => r.status === 'rejected',
+      );
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+      expect(rejected[0].reason).toBeInstanceOf(NicknameAlreadyExistsException);
+      expect(await channelRepository.countBy({ nickname: 'disputado' })).toBe(
+        1,
+      );
+    });
+  });
+
+  describe('findByNickname', () => {
+    it('finds a legacy 2-character nickname and rejects an unknown one', async () => {
+      const user = await createUser();
+      await channelRepository.save({
+        name: 'Legacy',
+        nickname: 'ab',
+        user_id: user.id,
+      });
+
+      await expect(channelsService.findByNickname('ab')).resolves.toMatchObject(
+        { nickname: 'ab', name: 'Legacy' },
+      );
+      await expect(
+        channelsService.findByNickname('inexistente'),
+      ).rejects.toBeInstanceOf(ChannelNotFoundException);
     });
   });
 });

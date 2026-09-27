@@ -15,6 +15,7 @@ import {
   getSchemaPath,
 } from '@nestjs/swagger';
 import { ApiErrorEnvelope } from '../common/openapi/api-error-envelope.dto';
+import { AuthenticatedThrottle } from '../throttling/throttle-class.decorator';
 import { AuthService } from './auth.service';
 import type { JwtPayload } from './auth.types';
 import { CurrentUser } from './decorators/current-user.decorator';
@@ -227,6 +228,7 @@ export class AuthController {
   }
 
   @Post('logout')
+  @AuthenticatedThrottle()
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiBearerAuth('access-token')
   @ApiOperation({
@@ -245,6 +247,7 @@ export class AuthController {
   }
 
   @Get('me')
+  @AuthenticatedThrottle()
   @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Get current user',

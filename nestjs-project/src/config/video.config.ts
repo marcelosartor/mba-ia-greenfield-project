@@ -10,4 +10,13 @@ export default registerAs('video', () => ({
     process.env.VIDEO_PROCESSING_TIMEOUT_MS || '1800000',
     10,
   ),
+  /** Width x height above which a custom thumbnail is refused undecoded. */
+  thumbnailMaxPixels: parseInt(
+    process.env.VIDEO_THUMBNAIL_MAX_PIXELS || '16777216',
+    10,
+  ),
+  thumbnailDecodeTimeoutMs: parseInt(
+    process.env.VIDEO_THUMBNAIL_TIMEOUT_MS || '5000',
+    10,
+  ),
 }));

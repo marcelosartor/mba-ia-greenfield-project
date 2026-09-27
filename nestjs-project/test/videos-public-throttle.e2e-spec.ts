@@ -4,7 +4,7 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { createE2eApp, registerConfirmAndLogin } from './helpers/e2e-app';
 
-// The global ThrottlerGuard allows 10 requests per minute per IP.
+// Unclassified routes (login) keep the `default` throttler: 10 per minute per IP.
 const BEYOND_THE_LIMIT = 25;
 
 describe('Rate limit on the public video routes (e2e)', () => {
@@ -57,11 +57,11 @@ describe('Rate limit on the public video routes (e2e)', () => {
     expect(result.filter((status) => status === 429).length).toBeGreaterThan(0);
   });
 
-  it('should keep the limit on the authenticated video routes', async () => {
+  it('should keep the per-user uploads limit on the upload routes', async () => {
     const token = await registerConfirmAndLogin(app, 'throttle@example.com');
     app.get<ThrottlerStorageService>(ThrottlerStorage).storage.clear();
     const result: number[] = [];
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 21; i++) {
       result.push(
         (
           await request(app.getHttpServer())
@@ -72,8 +72,8 @@ describe('Rate limit on the public video routes (e2e)', () => {
       );
     }
 
-    // an empty body is a 400 until the limit is reached
-    expect(result.slice(0, 10).every((status) => status === 400)).toBe(true);
+    // an empty body is a 400 until the `uploads` limit (20/min per user)
+    expect(result.slice(0, 20).every((status) => status === 400)).toBe(true);
     expect(result.at(-1)).toBe(429);
   });
 });

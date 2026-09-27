@@ -7,6 +7,7 @@ import mailConfig from './mail.config';
 import redisConfig from './redis.config';
 import storageConfig from './storage.config';
 import swaggerConfig from './swagger.config';
+import throttleConfig from './throttle.config';
 import videoConfig from './video.config';
 
 /** Global configuration shared by the API and the video worker. */
@@ -20,6 +21,7 @@ export const appConfigModule = ConfigModule.forRoot({
     redisConfig,
     storageConfig,
     swaggerConfig,
+    throttleConfig,
     videoConfig,
   ],
   validationSchema: envValidationSchema,

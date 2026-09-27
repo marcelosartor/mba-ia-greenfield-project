@@ -1,4 +1,5 @@
 import { Test } from '@nestjs/testing';
+import { Category } from '../categories/entities/category.entity';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { VerificationToken } from '../auth/entities/verification-token.entity';
@@ -8,7 +9,14 @@ import { User } from './entities/user.entity';
 import { UsersModule } from './users.module';
 import { Video } from '../videos/entities/video.entity';
 
-const ALL_ENTITIES = [User, Channel, RefreshToken, VerificationToken, Video];
+const ALL_ENTITIES = [
+  User,
+  Channel,
+  RefreshToken,
+  VerificationToken,
+  Video,
+  Category,
+];
 
 describe('UsersModule', () => {
   it('should compile successfully', async () => {

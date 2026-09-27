@@ -1,15 +1,53 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'node:crypto';
-import { IsNull, LessThan, QueryFailedError, Repository } from 'typeorm';
+import {
+  IsNull,
+  LessThan,
+  QueryFailedError,
+  Repository,
+  type SelectQueryBuilder,
+} from 'typeorm';
 import type { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 import { Video } from './entities/video.entity';
 import { generatePublicId } from './public-id.util';
 import { VideoStatus } from './video-status.enum';
+import { VideoVisibility } from './video-visibility.enum';
 
 const PUBLIC_ID_UNIQUE_CONSTRAINT = 'UQ_videos_public_id';
 const UNIQUE_VIOLATION = '23505';
 const MAX_PUBLIC_ID_ATTEMPTS = 5;
+
+/** Columns the owner may edit; everything else is written by the system. */
+export interface EditableVideoFields {
+  title?: string;
+  description?: string | null;
+  category_id?: string | null;
+  visibility?: VideoVisibility;
+}
+
+const EDITABLE_COLUMNS: readonly (keyof EditableVideoFields)[] = [
+  'title',
+  'description',
+  'category_id',
+  'visibility',
+];
+
+/**
+ * The single definition of a listable video (Phase 04, TD-01): published and
+ * public. Reused by the public channel page and, later, by Phases 05 and 07.
+ * Being published implies `ready` (CHK_videos_published_ready).
+ */
+export function whereListable<T extends object>(
+  query: SelectQueryBuilder<T>,
+  alias: string,
+): SelectQueryBuilder<T> {
+  return query
+    .andWhere(`${alias}.published_at IS NOT NULL`)
+    .andWhere(`${alias}.visibility = :listableVisibility`, {
+      listableVisibility: VideoVisibility.PUBLIC,
+    });
+}
 
 export interface CreateDraftInput {
   channelId: string;
@@ -61,6 +99,116 @@ export class VideosRepository {
 
   async findByPublicId(publicId: string): Promise<Video | null> {
     return this.repository.findOneBy({ public_id: publicId });
+  }
+
+  /** Loads the video with its channel (owner check) and category. */
+  async findByPublicIdWithRelations(publicId: string): Promise<Video | null> {
+    return this.repository.findOne({
+      where: { public_id: publicId },
+      relations: { channel: true, category: true },
+    });
+  }
+
+  /**
+   * Writes only the owner-editable columns, ignoring any other key, so an
+   * edit never touches what the worker writes (status, keys, metadata).
+   */
+  async updateEditableFields(
+    videoId: string,
+    changes: EditableVideoFields,
+  ): Promise<void> {
+    const allowed: QueryDeepPartialEntity<Video> = {};
+    for (const column of EDITABLE_COLUMNS) {
+      if (changes[column] !== undefined) {
+        (allowed as Record<string, unknown>)[column] = changes[column];
+      }
+    }
+    if (Object.keys(allowed).length === 0) return;
+    await this.repository.update({ id: videoId }, allowed);
+  }
+
+  /**
+   * Publishes only a `ready` video, writing `published_at = now()` on every
+   * call. Returns false when the video is not `ready` (nothing written).
+   */
+  async publish(
+    videoId: string,
+    visibility: VideoVisibility,
+  ): Promise<boolean> {
+    const result = await this.repository
+      .createQueryBuilder()
+      .update(Video)
+      .set({ published_at: () => 'now()', visibility })
+      .where('id = :videoId', { videoId })
+      .andWhere('status = :ready', { ready: VideoStatus.READY })
+      .execute();
+
+    return (result.affected ?? 0) > 0;
+  }
+
+  /** Back to editorial draft; the visibility is kept. */
+  async unpublish(videoId: string): Promise<void> {
+    await this.repository.update({ id: videoId }, { published_at: null });
+  }
+
+  async setCustomThumbnailKey(
+    videoId: string,
+    key: string | null,
+  ): Promise<void> {
+    await this.repository.update(
+      { id: videoId },
+      { custom_thumbnail_key: key },
+    );
+  }
+
+  /**
+   * One page of the owner's panel: every status, newest first, with the
+   * category joined. `offset`/`limit` instead of `skip`/`take` keeps it to one
+   * SELECT (the many-to-one join does not multiply rows) plus one COUNT.
+   */
+  async findPanelPage(
+    channelId: string,
+    page: number,
+    limit: number,
+  ): Promise<[Video[], number]> {
+    return this.repository
+      .createQueryBuilder('video')
+      .leftJoinAndSelect('video.category', 'category')
+      .where('video.channel_id = :channelId', { channelId })
+      .orderBy('video.created_at', 'DESC')
+      .addOrderBy('video.id', 'DESC')
+      .offset((page - 1) * limit)
+      .limit(limit)
+      .getManyAndCount();
+  }
+
+  /** One page of the public channel page: listable only, newest first. */
+  async findListablePage(
+    channelId: string,
+    page: number,
+    limit: number,
+  ): Promise<[Video[], number]> {
+    return whereListable(
+      this.repository
+        .createQueryBuilder('video')
+        .where('video.channel_id = :channelId', { channelId }),
+      'video',
+    )
+      .orderBy('video.published_at', 'DESC')
+      .addOrderBy('video.id', 'DESC')
+      .offset((page - 1) * limit)
+      .limit(limit)
+      .getManyAndCount();
+  }
+
+  /** `video_count` of the public channel page (same predicate as the list). */
+  async countListable(channelId: string): Promise<number> {
+    return whereListable(
+      this.repository
+        .createQueryBuilder('video')
+        .where('video.channel_id = :channelId', { channelId }),
+      'video',
+    ).getCount();
   }
 
   async findById(videoId: string): Promise<Video | null> {

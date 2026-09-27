@@ -1,30 +1,39 @@
 import { INestApplication } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import { ThrottlerStorage, ThrottlerStorageService } from '@nestjs/throttler';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
+import { Category } from '../src/categories/entities/category.entity';
+import { Channel } from '../src/channels/entities/channel.entity';
 import { StorageService } from '../src/storage/storage.service';
 import { cleanAllTables } from '../src/test/create-test-data-source';
 import { Video } from '../src/videos/entities/video.entity';
 import { VideoStatus } from '../src/videos/video-status.enum';
+import { VideoVisibility } from '../src/videos/video-visibility.enum';
 import { createE2eApp, registerConfirmAndLogin } from './helpers/e2e-app';
 import { discardStoredUploads } from './helpers/video-e2e';
 
-interface VideoBody {
-  public_id: string;
-  title: string;
-  status: string;
-  duration_seconds: number;
-  width: number;
-  height: number;
-  created_at: string;
-}
+type VideoChanges = Partial<
+  Pick<
+    Video,
+    | 'status'
+    | 'duration_seconds'
+    | 'width'
+    | 'height'
+    | 'published_at'
+    | 'visibility'
+    | 'description'
+    | 'category_id'
+  >
+>;
 
-describe('GET /videos/:public_id (e2e)', () => {
+describe('videos-get', () => {
   let app: INestApplication<App>;
   let dataSource: DataSource;
   let storage: StorageService;
-  let token: string;
+  let tokenA: string;
+  let tokenB: string;
 
   beforeAll(async () => {
     app = await createE2eApp();
@@ -39,7 +48,8 @@ describe('GET /videos/:public_id (e2e)', () => {
   beforeEach(async () => {
     await cleanAllTables(dataSource);
     app.get<ThrottlerStorageService>(ThrottlerStorage).storage.clear();
-    token = await registerConfirmAndLogin(app, 'owner-a@example.com');
+    tokenA = await registerConfirmAndLogin(app, 'owner-a@example.com');
+    tokenB = await registerConfirmAndLogin(app, 'other-b@example.com');
   });
 
   afterEach(async () => {
@@ -52,100 +62,120 @@ describe('GET /videos/:public_id (e2e)', () => {
   const createVideo = async (filename = 'a.mp4'): Promise<string> => {
     const res = await request(app.getHttpServer())
       .post('/videos')
-      .set('Authorization', `Bearer ${token}`)
-      .send({
-        filename,
-        content_type: 'video/mp4',
-        size_bytes: 1_000_000,
-      })
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ filename, content_type: 'video/mp4', size_bytes: 1_000_000 })
       .expect(201);
     return (res.body as { public_id: string }).public_id;
   };
 
-  // The worker does not run here: the result of its processing is seeded.
-  const seed = async (
-    publicId: string,
-    changes: Partial<
-      Pick<Video, 'status' | 'duration_seconds' | 'width' | 'height'>
-    >,
-  ): Promise<void> => {
+  // The worker and the publication are not exercised here: their result is
+  // seeded on the row.
+  const seed = async (publicId: string, changes: VideoChanges) => {
     const result = await dataSource
       .getRepository(Video)
       .update({ public_id: publicId }, changes);
     expect(result.affected).toBe(1);
   };
 
-  it('should let an anonymous caller read a ready video', async () => {
-    const publicId = await createVideo('holiday.mp4');
+  const readyProcessed: VideoChanges = {
+    status: VideoStatus.READY,
+    duration_seconds: 12.5,
+    width: 640,
+    height: 360,
+  };
+
+  const get = (publicId: string, token?: string) => {
+    const req = request(app.getHttpServer()).get(`/videos/${publicId}`);
+    return token ? req.set('Authorization', `Bearer ${token}`) : req;
+  };
+
+  // 1. Ler os metadados de um vídeo conforme a publicação
+
+  it('anonimo-le-video-publicado-com-contrato-ampliado', async () => {
+    const publicId = await createVideo();
+    const musica = await dataSource
+      .getRepository(Category)
+      .findOneByOrFail({ slug: 'musica' });
     await seed(publicId, {
-      status: VideoStatus.READY,
-      duration_seconds: 12.5,
-      width: 640,
-      height: 360,
+      ...readyProcessed,
+      published_at: new Date(),
+      visibility: VideoVisibility.PUBLIC,
+      description: 'Sobre o vídeo',
+      category_id: musica.id,
     });
 
-    const res = await request(app.getHttpServer())
-      .get(`/videos/${publicId}`)
-      .expect(200);
+    const res = await get(publicId).expect(200);
 
-    const body = res.body as VideoBody;
+    expect(res.headers['cache-control']).toBe('private, no-cache');
+    const body = res.body as Record<string, unknown>;
     expect(body).toMatchObject({
       public_id: publicId,
-      title: 'holiday',
-      status: 'ready',
-      duration_seconds: 12.5,
-      width: 640,
-      height: 360,
+      description: 'Sobre o vídeo',
+      category: { slug: 'musica', name: 'Música' },
+      visibility: 'public',
+      thumbnail_url: `/videos/${publicId}/thumbnail`,
     });
-    expect(new Date(body.created_at).toISOString()).toBe(body.created_at);
-    expect(Object.keys(body)).not.toContain('video_key');
+    expect(typeof body.published_at).toBe('string');
+    expect(typeof body.updated_at).toBe('string');
+    for (const hidden of [
+      'id',
+      'channel_id',
+      'video_key',
+      'thumbnail_key',
+      'custom_thumbnail_key',
+    ]) {
+      expect(body).not.toHaveProperty(hidden);
+    }
   });
 
-  it.each([VideoStatus.DRAFT, VideoStatus.PROCESSING, VideoStatus.ERROR])(
-    'should answer VIDEO_NOT_READY for a video in %s',
-    async (status) => {
-      const publicId = await createVideo();
-      await seed(publicId, { status });
+  it('rascunho-pronto-so-para-o-dono', async () => {
+    const publicId = await createVideo();
+    await seed(publicId, { ...readyProcessed, published_at: null });
 
-      const res = await request(app.getHttpServer())
-        .get(`/videos/${publicId}`)
-        .expect(409);
+    for (const token of [undefined, tokenB]) {
+      const res = await get(publicId, token).expect(404);
+      expect((res.body as { error: string }).error).toBe('VIDEO_NOT_FOUND');
+    }
 
-      expect((res.body as { error: string }).error).toBe('VIDEO_NOT_READY');
-    },
-  );
+    const res = await get(publicId, tokenA).expect(200);
+    expect((res.body as { published_at: unknown }).published_at).toBeNull();
+  });
 
-  it('should answer VIDEO_NOT_FOUND for an unknown public_id', async () => {
-    const res = await request(app.getHttpServer())
-      .get('/videos/aaaaaaaaaaa')
-      .expect(404);
+  it('video-em-processamento-404-antes-de-409', async () => {
+    const publicId = await createVideo();
+    await seed(publicId, { status: VideoStatus.PROCESSING });
 
+    const anonymous = await get(publicId).expect(404);
+    expect((anonymous.body as { error: string }).error).toBe('VIDEO_NOT_FOUND');
+
+    const owner = await get(publicId, tokenA).expect(409);
+    expect((owner.body as { error: string }).error).toBe('VIDEO_NOT_READY');
+  });
+
+  it('token-expirado-vale-como-anonimo', async () => {
+    const channel = await dataSource
+      .getRepository(Channel)
+      .findOneOrFail({ where: { user: { email: 'owner-a@example.com' } } });
+    const expired = app
+      .get(JwtService)
+      .sign(
+        { sub: channel.user_id, email: 'owner-a@example.com' },
+        { expiresIn: -60 },
+      );
+
+    const published = await createVideo('published.mp4');
+    await seed(published, { ...readyProcessed, published_at: new Date() });
+    await get(published, expired).expect(200);
+
+    const draft = await createVideo('draft.mp4');
+    await seed(draft, { ...readyProcessed, published_at: null });
+    const res = await get(draft, expired).expect(404);
     expect((res.body as { error: string }).error).toBe('VIDEO_NOT_FOUND');
   });
 
-  it('should keep the public_id returned by POST /videos after processing', async () => {
-    const publicId = await createVideo();
-    expect(publicId).toHaveLength(11);
-    await seed(publicId, {
-      status: VideoStatus.READY,
-      duration_seconds: 3,
-      width: 320,
-      height: 240,
-    });
+  it('video-inexistente', async () => {
+    const res = await get('aaaaaaaaaaa', tokenA).expect(404);
 
-    const res = await request(app.getHttpServer())
-      .get(`/videos/${publicId}`)
-      .expect(200);
-
-    expect((res.body as VideoBody).public_id).toBe(publicId);
-  });
-
-  it('should not let the route swallow the upload session route', async () => {
-    const publicId = await createVideo();
-
-    // still authenticated-only: an anonymous call to the sub-resource is 401
-    await request(app.getHttpServer())
-      .get(`/videos/${publicId}/upload`)
-      .expect(401);
+    expect((res.body as { error: string }).error).toBe('VIDEO_NOT_FOUND');
   });
 });

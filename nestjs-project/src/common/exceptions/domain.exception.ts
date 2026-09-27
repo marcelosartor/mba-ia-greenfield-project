@@ -59,7 +59,7 @@ export class StorageUnavailableException extends DomainException {
 
 export class ChannelNotFoundException extends DomainException {
   constructor() {
-    super('CHANNEL_NOT_FOUND', 404, 'Authenticated user has no channel');
+    super('CHANNEL_NOT_FOUND', 404, 'Channel not found');
   }
 }
 
@@ -90,7 +90,7 @@ export class VideoAccessDeniedException extends DomainException {
     super(
       'VIDEO_ACCESS_DENIED',
       403,
-      'Only the owner of the video can manage its upload',
+      'Only the owner of the video can manage it',
     );
   }
 }
@@ -132,5 +132,53 @@ export class InvalidPartNumberException extends DomainException {
       400,
       'Part number is beyond the number of parts of the declared size',
     );
+  }
+}
+
+export class InvalidCategoryException extends DomainException {
+  constructor() {
+    super('INVALID_CATEGORY', 400, 'Category does not exist');
+  }
+}
+
+export class VideoNotPublishableException extends DomainException {
+  constructor() {
+    super(
+      'VIDEO_NOT_PUBLISHABLE',
+      409,
+      'Only a video that finished processing can be published',
+    );
+  }
+}
+
+export class InvalidImageException extends DomainException {
+  constructor() {
+    super(
+      'INVALID_IMAGE',
+      415,
+      'The file is not a JPEG, PNG or static WebP image within the limits',
+    );
+  }
+}
+
+export class ImageTooLargeException extends DomainException {
+  constructor() {
+    super('IMAGE_TOO_LARGE', 413, 'Image exceeds the maximum allowed size');
+  }
+}
+
+export class NicknameAlreadyExistsException extends DomainException {
+  constructor() {
+    super(
+      'NICKNAME_ALREADY_EXISTS',
+      409,
+      'Nickname is already used by another channel',
+    );
+  }
+}
+
+export class NicknameReservedException extends DomainException {
+  constructor() {
+    super('NICKNAME_RESERVED', 400, 'Nickname is reserved');
   }
 }

@@ -4,10 +4,10 @@ import { Channel } from '../channels/entities/channel.entity';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { VerificationToken } from '../auth/entities/verification-token.entity';
 import { Video } from '../videos/entities/video.entity';
-import { CreateUsersAndChannels1775687773260 } from './migrations/1775687773260-CreateUsersAndChannels';
-import { CreateAuthTokens1777579850478 } from './migrations/1777579850478-CreateAuthTokens';
-import { CreateVideos1789938672313 } from './migrations/1789938672313-CreateVideos';
+import { Category } from '../categories/entities/category.entity';
 import { AddDeclaredSizeToVideos1790433669266 } from './migrations/1790433669266-AddDeclaredSizeToVideos';
+import { CreateVideos1789938672313 } from './migrations/1789938672313-CreateVideos';
+import { ALL_MIGRATIONS, undoMigrationsThrough } from '../test/all-migrations';
 import { createTestDataSource } from '../test/create-test-data-source';
 
 const MANAGED_TABLES = [
@@ -16,6 +16,7 @@ const MANAGED_TABLES = [
   'refresh_tokens',
   'verification_tokens',
   'videos',
+  'categories',
 ];
 
 describe('Database migrations (integration)', () => {
@@ -23,16 +24,8 @@ describe('Database migrations (integration)', () => {
 
   beforeAll(async () => {
     dataSource = createTestDataSource(
-      [User, Channel, RefreshToken, VerificationToken, Video],
-      {
-        synchronize: false,
-        migrations: [
-          CreateUsersAndChannels1775687773260,
-          CreateAuthTokens1777579850478,
-          CreateVideos1789938672313,
-          AddDeclaredSizeToVideos1790433669266,
-        ],
-      },
+      [User, Channel, RefreshToken, VerificationToken, Video, Category],
+      { synchronize: false, migrations: ALL_MIGRATIONS },
     );
 
     await dataSource.initialize();
@@ -50,7 +43,7 @@ describe('Database migrations (integration)', () => {
   });
 
   afterAll(async () => {
-    // The last two tests undo migrations, leaving the videos table missing.
+    // The last tests undo migrations, leaving the videos table missing.
     // Re-apply so the shared DB is fully migrated when subsequent suites run.
     try {
       await dataSource.runMigrations();
@@ -59,10 +52,10 @@ describe('Database migrations (integration)', () => {
     }
   });
 
-  it('should apply all migrations and create all five tables', async () => {
+  it('should apply all migrations and create all the tables', async () => {
     const ranMigrations = await dataSource.runMigrations();
 
-    expect(ranMigrations).toHaveLength(4);
+    expect(ranMigrations).toHaveLength(ALL_MIGRATIONS.length);
 
     const result = await dataSource.query<{ table_name: string }[]>(
       `SELECT table_name FROM information_schema.tables
@@ -73,6 +66,7 @@ describe('Database migrations (integration)', () => {
     );
     const tableNames = result.map((r) => r.table_name);
     expect(tableNames).toEqual([
+      'categories',
       'channels',
       'refresh_tokens',
       'users',
@@ -92,7 +86,10 @@ describe('Database migrations (integration)', () => {
   it('should add the declared size column and revert it without touching the table', async () => {
     expect(await columnsOfVideos()).toContain('declared_size_bytes');
 
-    await dataSource.undoLastMigration();
+    await undoMigrationsThrough(
+      dataSource,
+      AddDeclaredSizeToVideos1790433669266,
+    );
 
     const columns = await columnsOfVideos();
     expect(columns).not.toContain('declared_size_bytes');
@@ -100,7 +97,7 @@ describe('Database migrations (integration)', () => {
   });
 
   it('should revert the videos migration and remove the table', async () => {
-    await dataSource.undoLastMigration();
+    await undoMigrationsThrough(dataSource, CreateVideos1789938672313);
 
     const result = await dataSource.query<{ table_name: string }[]>(
       `SELECT table_name FROM information_schema.tables

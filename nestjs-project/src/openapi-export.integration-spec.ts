@@ -144,9 +144,24 @@ describe('exportSpec (integration)', () => {
         path: '/videos/{public_id}/upload/completion',
         protected: true,
       },
-      { method: 'get', path: '/videos/{public_id}', protected: false },
-      { method: 'get', path: '/videos/{public_id}/stream', protected: false },
-      { method: 'get', path: '/videos/{public_id}/download', protected: false },
+      {
+        method: 'get',
+        path: '/videos/{public_id}',
+        protected: false,
+        optional: true,
+      },
+      {
+        method: 'get',
+        path: '/videos/{public_id}/stream',
+        protected: false,
+        optional: true,
+      },
+      {
+        method: 'get',
+        path: '/videos/{public_id}/download',
+        protected: false,
+        optional: true,
+      },
     ];
 
     const operationOf = (
@@ -171,11 +186,18 @@ describe('exportSpec (integration)', () => {
 
     it.each(VIDEO_OPERATIONS)(
       'requires the access token only where the endpoint is not public: $method $path',
-      ({ method, path, protected: isProtected }) => {
+      ({ method, path, protected: isProtected, optional }) => {
         const security = operationOf(document, path, method)?.security as
           | Record<string, unknown>[]
           | undefined;
 
+        if (optional) {
+          // @OptionalAuth() (Phase 04): no token, or the access-token bearer.
+          expect(security).toEqual(
+            expect.arrayContaining([{}, { 'access-token': [] }]),
+          );
+          return;
+        }
         expect(security?.some((req) => 'access-token' in req) ?? false).toBe(
           isProtected,
         );

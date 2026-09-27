@@ -17,6 +17,8 @@ const config: ConfigType<typeof videoConfig> = {
   partSizeBytes: 64 * 1024 * 1024,
   workerConcurrency: 1,
   processingTimeoutMs: 1_800_000,
+  thumbnailMaxPixels: 16_777_216,
+  thumbnailDecodeTimeoutMs: 5_000,
 };
 
 const video = {

@@ -1156,34 +1156,34 @@ A árvore mostra cada SI sob um único pai; as dependências adicionais (mais de
 
 ## Deliverables
 
-- [ ] SI-04.1 — Configurar os namespaces e as variáveis de ambiente de limite de requisições e da capa customizada
-- [ ] SI-04.2 — Implementar a autenticação opcional (`@OptionalAuth()`) no guard global
-- [ ] SI-04.3 — Substituir o throttler único por throttlers nomeados por classe de rota
-- [ ] SI-04.4 — Criar a tabela de categorias, a lista inicial e o CategoriesModule
-- [ ] SI-04.5 — Endpoint GET /categories
-- [ ] SI-04.6 — Acrescentar ao vídeo as colunas de edição, publicação, categoria e capa customizada
-- [ ] SI-04.7 — Endpoint GET /videos/{public_id} (acesso por publicação e contrato ampliado)
-- [ ] SI-04.8 — Endpoint GET /videos/{public_id}/stream (acesso por publicação)
-- [ ] SI-04.9 — Endpoint GET /videos/{public_id}/download (acesso por publicação)
-- [ ] SI-04.10 — Endpoint PATCH /videos/{public_id}
-- [ ] SI-04.11 — Endpoint POST /videos/{public_id}/publication
-- [ ] SI-04.12 — Endpoint DELETE /videos/{public_id}/publication
-- [ ] SI-04.13 — Implementar o normalizador de imagem da capa com ffmpeg em pipe
-- [ ] SI-04.14 — Endpoint GET /videos/{public_id}/thumbnail
-- [ ] SI-04.15 — Endpoint PUT /videos/{public_id}/thumbnail
-- [ ] SI-04.16 — Endpoint DELETE /videos/{public_id}/thumbnail
-- [ ] SI-04.17 — Aplicar as regras de nickname na validação e na geração do cadastro
-- [ ] SI-04.18 — Implementar o VideoListingsModule com as consultas do painel, da página pública e do `video_count`
-- [ ] SI-04.19 — Endpoint PATCH /channels/me
-- [ ] SI-04.20 — Endpoint GET /channels/{nickname}
-- [ ] SI-04.21 — Endpoint GET /channels/me/videos (painel)
-- [ ] SI-04.22 — Endpoint GET /channels/{nickname}/videos
-- [ ] SI-04.23 — Publicar o contrato OpenAPI e os exemplos de requisição da fase
-- [ ] SI-04.24 — Atualizar a documentação e fechar a Definition of Done da fase
+- [x] SI-04.1 — Configurar os namespaces e as variáveis de ambiente de limite de requisições e da capa customizada
+- [x] SI-04.2 — Implementar a autenticação opcional (`@OptionalAuth()`) no guard global
+- [x] SI-04.3 — Substituir o throttler único por throttlers nomeados por classe de rota
+- [x] SI-04.4 — Criar a tabela de categorias, a lista inicial e o CategoriesModule
+- [x] SI-04.5 — Endpoint GET /categories
+- [x] SI-04.6 — Acrescentar ao vídeo as colunas de edição, publicação, categoria e capa customizada
+- [x] SI-04.7 — Endpoint GET /videos/{public_id} (acesso por publicação e contrato ampliado)
+- [x] SI-04.8 — Endpoint GET /videos/{public_id}/stream (acesso por publicação)
+- [x] SI-04.9 — Endpoint GET /videos/{public_id}/download (acesso por publicação)
+- [x] SI-04.10 — Endpoint PATCH /videos/{public_id}
+- [x] SI-04.11 — Endpoint POST /videos/{public_id}/publication
+- [x] SI-04.12 — Endpoint DELETE /videos/{public_id}/publication
+- [x] SI-04.13 — Implementar o normalizador de imagem da capa com ffmpeg em pipe
+- [x] SI-04.14 — Endpoint GET /videos/{public_id}/thumbnail
+- [x] SI-04.15 — Endpoint PUT /videos/{public_id}/thumbnail
+- [x] SI-04.16 — Endpoint DELETE /videos/{public_id}/thumbnail
+- [x] SI-04.17 — Aplicar as regras de nickname na validação e na geração do cadastro
+- [x] SI-04.18 — Implementar o VideoListingsModule com as consultas do painel, da página pública e do `video_count`
+- [x] SI-04.19 — Endpoint PATCH /channels/me
+- [x] SI-04.20 — Endpoint GET /channels/{nickname}
+- [x] SI-04.21 — Endpoint GET /channels/me/videos (painel)
+- [x] SI-04.22 — Endpoint GET /channels/{nickname}/videos
+- [x] SI-04.23 — Publicar o contrato OpenAPI e os exemplos de requisição da fase
+- [x] SI-04.24 — Atualizar a documentação e fechar a Definition of Done da fase
 
 **Full test suites:**
 
-- [ ] Backend tests pass (`cd nestjs-project && docker compose exec nestjs-api npm test -- --runInBand`)
-- [ ] E2E tests pass (`cd nestjs-project && docker compose exec nestjs-api npm run test:e2e`)
-- [ ] Type/compilation checks pass (`cd nestjs-project && docker compose exec nestjs-api npx tsc --noEmit`)
-- [ ] Lint passes (`cd nestjs-project && docker compose exec nestjs-api npm run lint`)
+- [x] Backend tests pass (`cd nestjs-project && docker compose exec nestjs-api npm test -- --runInBand`)
+- [x] E2E tests pass (`cd nestjs-project && docker compose exec nestjs-api npm run test:e2e`)
+- [x] Type/compilation checks pass (`cd nestjs-project && docker compose exec nestjs-api npx tsc --noEmit`)
+- [x] Lint passes (`cd nestjs-project && docker compose exec nestjs-api npm run lint`)

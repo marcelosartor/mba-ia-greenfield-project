@@ -1,4 +1,5 @@
 import { DataSource, Repository } from 'typeorm';
+import { Category } from '../../categories/entities/category.entity';
 import { RefreshToken } from '../../auth/entities/refresh-token.entity';
 import { VerificationToken } from '../../auth/entities/verification-token.entity';
 import { Channel } from '../../channels/entities/channel.entity';
@@ -10,7 +11,14 @@ import { User } from '../../users/entities/user.entity';
 import { VideoStatus } from '../video-status.enum';
 import { Video } from './video.entity';
 
-const ALL_ENTITIES = [User, Channel, RefreshToken, VerificationToken, Video];
+const ALL_ENTITIES = [
+  User,
+  Channel,
+  RefreshToken,
+  VerificationToken,
+  Video,
+  Category,
+];
 
 describe('Video entity (integration)', () => {
   let dataSource: DataSource;
@@ -111,5 +119,59 @@ describe('Video entity (integration)', () => {
 
     expect(loaded.videos).toHaveLength(1);
     expect(loaded.videos[0].public_id).toBe('abcdefghijk');
+  });
+
+  describe('Phase 04 columns', () => {
+    it('should default visibility to public, with no publication, description, category or custom cover', async () => {
+      const saved = await videoRepository.save(newVideo());
+
+      const found = await videoRepository.findOneByOrFail({ id: saved.id });
+      expect(found.visibility).toBe('public');
+      expect(found.published_at).toBeNull();
+      expect(found.description).toBeNull();
+      expect(found.category_id).toBeNull();
+      expect(found.custom_thumbnail_key).toBeNull();
+    });
+
+    it('should reject a visibility other than public or unlisted (CHK_videos_visibility)', async () => {
+      await expect(
+        videoRepository.save(
+          newVideo({ visibility: 'private' as Video['visibility'] }),
+        ),
+      ).rejects.toMatchObject({
+        driverError: { constraint: 'CHK_videos_visibility' },
+      });
+    });
+
+    it('should reject published_at on a video that is not ready (CHK_videos_published_ready)', async () => {
+      await expect(
+        videoRepository.save(
+          newVideo({
+            status: VideoStatus.PROCESSING,
+            published_at: new Date(),
+          }),
+        ),
+      ).rejects.toMatchObject({
+        driverError: { constraint: 'CHK_videos_published_ready' },
+      });
+    });
+
+    it('should accept published_at on a ready video', async () => {
+      const saved = await videoRepository.save(
+        newVideo({ status: VideoStatus.READY, published_at: new Date() }),
+      );
+
+      expect(
+        (await videoRepository.findOneByOrFail({ id: saved.id })).published_at,
+      ).toBeInstanceOf(Date);
+    });
+
+    it('should reject a category_id that does not exist (foreign key)', async () => {
+      await expect(
+        videoRepository.save(
+          newVideo({ category_id: '00000000-0000-0000-0000-000000000000' }),
+        ),
+      ).rejects.toMatchObject({ driverError: { code: '23503' } });
+    });
   });
 });

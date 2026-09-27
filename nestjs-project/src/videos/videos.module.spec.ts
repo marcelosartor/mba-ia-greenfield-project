@@ -1,4 +1,5 @@
 import { ConfigModule } from '@nestjs/config';
+import { Category } from '../categories/entities/category.entity';
 import { Test } from '@nestjs/testing';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
@@ -13,7 +14,14 @@ import { Video } from './entities/video.entity';
 import { VideosModule } from './videos.module';
 import { VideosRepository } from './videos.repository';
 
-const ALL_ENTITIES = [User, Channel, RefreshToken, VerificationToken, Video];
+const ALL_ENTITIES = [
+  User,
+  Channel,
+  RefreshToken,
+  VerificationToken,
+  Video,
+  Category,
+];
 
 describe('VideosModule', () => {
   it('should compile and expose VideosRepository', async () => {

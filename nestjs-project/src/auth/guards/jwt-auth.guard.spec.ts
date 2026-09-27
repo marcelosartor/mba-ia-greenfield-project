@@ -2,6 +2,7 @@ import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { JwtModule, JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
+import { IS_OPTIONAL_AUTH_KEY } from '../decorators/optional-auth.decorator';
 import { JwtAuthGuard } from './jwt-auth.guard';
 
 const TEST_SECRET = 'test-secret';
@@ -87,5 +88,71 @@ describe('JwtAuthGuard', () => {
       headers: { authorization: `Bearer ${expiredToken}` },
     });
     await expect(guard.canActivate(ctx)).rejects.toThrow(UnauthorizedException);
+  });
+
+  describe('on @OptionalAuth() routes', () => {
+    beforeEach(() => {
+      mockReflector.getAllAndOverride.mockImplementation(
+        (key: string) => key === IS_OPTIONAL_AUTH_KEY,
+      );
+    });
+
+    it('attaches the payload of a valid token to request.user', async () => {
+      const token = jwtService.sign({ sub: 'user-1', email: 'a@example.com' });
+      const request: Record<string, unknown> = {
+        headers: { authorization: `Bearer ${token}` },
+      };
+
+      await expect(guard.canActivate(makeContext(request))).resolves.toBe(true);
+      expect((request.user as Record<string, unknown>)?.sub).toBe('user-1');
+    });
+
+    it.each([
+      ['a missing header', {}],
+      ['a malformed token', { authorization: 'Bearer abc' }],
+      ['a header without the Bearer prefix', { authorization: 'Token abc' }],
+    ])('lets %s through as anonymous', async (_label, headers) => {
+      const request: Record<string, unknown> = { headers };
+
+      await expect(guard.canActivate(makeContext(request))).resolves.toBe(true);
+      expect(request.user).toBeUndefined();
+    });
+
+    it('lets a token with an invalid signature through as anonymous', async () => {
+      const forged = new JwtService({ secret: 'another-secret' }).sign({
+        sub: 'user-1',
+        email: 'a@example.com',
+      });
+      const request: Record<string, unknown> = {
+        headers: { authorization: `Bearer ${forged}` },
+      };
+
+      await expect(guard.canActivate(makeContext(request))).resolves.toBe(true);
+      expect(request.user).toBeUndefined();
+    });
+
+    it('lets an expired token through as anonymous', async () => {
+      const expired = jwtService.sign(
+        { sub: 'user-1', email: 'a@example.com' },
+        { expiresIn: -60 },
+      );
+      const request: Record<string, unknown> = {
+        headers: { authorization: `Bearer ${expired}` },
+      };
+
+      await expect(guard.canActivate(makeContext(request))).resolves.toBe(true);
+      expect(request.user).toBeUndefined();
+    });
+
+    it('ignores a token sent in the query string or in a cookie', async () => {
+      const token = jwtService.sign({ sub: 'user-1', email: 'a@example.com' });
+      const request: Record<string, unknown> = {
+        headers: { cookie: `access_token=${token}` },
+        query: { token },
+      };
+
+      await expect(guard.canActivate(makeContext(request))).resolves.toBe(true);
+      expect(request.user).toBeUndefined();
+    });
   });
 });

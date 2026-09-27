@@ -1,4 +1,5 @@
 import * as crypto from 'crypto';
+import { Category } from '../categories/entities/category.entity';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigModule, ConfigType } from '@nestjs/config';
 import type { StringValue } from 'ms';
@@ -34,7 +35,14 @@ import {
   VerificationTokenType,
 } from './entities/verification-token.entity';
 
-const ALL_ENTITIES = [User, Channel, RefreshToken, VerificationToken, Video];
+const ALL_ENTITIES = [
+  User,
+  Channel,
+  RefreshToken,
+  VerificationToken,
+  Video,
+  Category,
+];
 
 async function createAuthTestModule(): Promise<TestingModule> {
   const ds = createTestDataSource(ALL_ENTITIES);

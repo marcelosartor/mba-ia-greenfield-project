@@ -18,6 +18,7 @@ import type { StorageService } from '../storage/storage.service';
 import type { CreateVideoDto } from './dto/create-video.dto';
 import type { Video } from './entities/video.entity';
 import { VideoStatus } from './video-status.enum';
+import { VideoOwnershipService } from './video-ownership.service';
 import { VideoUploadsService } from './video-uploads.service';
 import type { VideosRepository } from './videos.repository';
 
@@ -25,6 +26,8 @@ const config: ConfigType<typeof videoConfig> = {
   partSizeBytes: 64 * 1024 * 1024,
   workerConcurrency: 1,
   processingTimeoutMs: 1_800_000,
+  thumbnailMaxPixels: 16_777_216,
+  thumbnailDecodeTimeoutMs: 5_000,
 };
 
 const channel = { id: 'channel-1', user_id: 'user-1' } as Channel;
@@ -86,6 +89,11 @@ describe('VideoUploadsService', () => {
       videosRepository as unknown as VideosRepository,
       storageService as unknown as StorageService,
       publisher as unknown as VideoProcessingPublisher,
+      // The real ownership rule over the same mocks.
+      new VideoOwnershipService(
+        videosRepository as unknown as VideosRepository,
+        channelsService as unknown as ChannelsService,
+      ),
       config,
     );
   });

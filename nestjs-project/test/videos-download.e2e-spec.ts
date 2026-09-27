@@ -21,12 +21,12 @@ import {
 import { User } from '../src/users/entities/user.entity';
 import { Video } from '../src/videos/entities/video.entity';
 import { VideoStatus } from '../src/videos/video-status.enum';
-import { createE2eApp } from './helpers/e2e-app';
+import { createE2eApp, registerConfirmAndLogin } from './helpers/e2e-app';
 
 const SIZE = 2_097_152;
 const TITLE = 'Meu vídeo: teste/1';
 
-describe('GET /videos/:public_id/download (e2e)', () => {
+describe('videos-download', () => {
   let app: INestApplication<App>;
   let dataSource: DataSource;
   let storage: StorageService;
@@ -34,6 +34,8 @@ describe('GET /videos/:public_id/download (e2e)', () => {
   let channel: Channel;
   let content: Buffer;
   let video: Video;
+  let tokenA: string;
+  let tokenB: string;
 
   beforeAll(async () => {
     app = await createE2eApp();
@@ -50,12 +52,14 @@ describe('GET /videos/:public_id/download (e2e)', () => {
   beforeEach(async () => {
     await cleanAllTables(dataSource);
     app.get<ThrottlerStorageService>(ThrottlerStorage).storage.clear();
-    const user = await dataSource
+    tokenA = await registerConfirmAndLogin(app, 'owner-a@example.com');
+    tokenB = await registerConfirmAndLogin(app, 'other-b@example.com');
+    const owner = await dataSource
       .getRepository(User)
-      .save({ email: 'owner-a@example.com', password: 'hashed' });
+      .findOneByOrFail({ email: 'owner-a@example.com' });
     channel = await dataSource
       .getRepository(Channel)
-      .save({ name: 'Owner A', nickname: 'ownera', user_id: user.id });
+      .findOneByOrFail({ user_id: owner.id });
     content = randomContent(SIZE);
     video = await seedVideo(content, VideoStatus.READY);
   });
@@ -71,10 +75,12 @@ describe('GET /videos/:public_id/download (e2e)', () => {
   });
 
   let counter = 0;
-  // The worker does not run here: a ready video is seeded with a real object.
+  // The worker and the publication do not run here: a video is seeded with a
+  // real object, published unless `published` is false.
   const seedVideo = async (
     body: Buffer,
     status: VideoStatus,
+    published = status === VideoStatus.READY,
   ): Promise<Video> => {
     const publicId = `download${String(++counter).padStart(3, '0')}`;
     const seeded = await dataSource.getRepository(Video).save({
@@ -82,6 +88,7 @@ describe('GET /videos/:public_id/download (e2e)', () => {
       channel_id: channel.id,
       title: TITLE,
       status,
+      published_at: published ? new Date() : null,
       video_key: `${channel.id}/${publicId}/source.mp4`,
     });
     await storage.putObject(
@@ -93,10 +100,16 @@ describe('GET /videos/:public_id/download (e2e)', () => {
     return seeded;
   };
 
-  const download = (publicId: string) =>
-    request(app.getHttpServer()).get(`/videos/${publicId}/download`);
+  const download = (publicId: string, token?: string) => {
+    const req = request(app.getHttpServer()).get(
+      `/videos/${publicId}/download`,
+    );
+    return token ? req.set('Authorization', `Bearer ${token}`) : req;
+  };
 
-  it('should download the intact file without authentication', async () => {
+  // 1. Baixar o arquivo conforme a publicação
+
+  it('baixa-video-publicado-com-cache-privado', async () => {
     const res = await new Promise<{
       status: number;
       headers: Record<string, string>;
@@ -120,12 +133,36 @@ describe('GET /videos/:public_id/download (e2e)', () => {
     });
 
     expect(res.status).toBe(200);
+    expect(res.headers['content-disposition']).toMatch(
+      /^attachment; filename="/,
+    );
+    expect(res.headers['cache-control']).toBe('private, no-cache');
     expect(res.headers['content-length']).toBe(String(SIZE));
     expect(res.digest.bytes).toBe(SIZE);
     expect(res.digest.sha256).toBe(sha256(content));
   });
 
-  it('should send it as an attachment with a safe, encoded file name', async () => {
+  it('rascunho-so-para-o-dono', async () => {
+    const draft = await seedVideo(content, VideoStatus.READY, false);
+
+    const other = await download(draft.public_id, tokenB).expect(404);
+    expect((other.body as { error: string }).error).toBe('VIDEO_NOT_FOUND');
+
+    const owner = await download(draft.public_id, tokenA).expect(200);
+    expect(owner.headers['content-length']).toBe(String(SIZE));
+  });
+
+  it('video-em-erro-para-o-dono', async () => {
+    const errored = await seedVideo(Buffer.from('x'), VideoStatus.ERROR);
+
+    const owner = await download(errored.public_id, tokenA).expect(409);
+    expect((owner.body as { error: string }).error).toBe('VIDEO_NOT_READY');
+
+    const anonymous = await download(errored.public_id).expect(404);
+    expect((anonymous.body as { error: string }).error).toBe('VIDEO_NOT_FOUND');
+  });
+
+  it('define-nome-de-arquivo-do-anexo', async () => {
     const res = await download(video.public_id).expect(200);
 
     const disposition = res.headers['content-disposition'];
@@ -138,18 +175,7 @@ describe('GET /videos/:public_id/download (e2e)', () => {
     expect(decodeURIComponent(encoded)).toBe('Meu vídeo teste 1.mp4');
   });
 
-  it.each([VideoStatus.DRAFT, VideoStatus.PROCESSING, VideoStatus.ERROR])(
-    'should answer VIDEO_NOT_READY for a video in %s',
-    async (status) => {
-      const other = await seedVideo(Buffer.from('x'), status);
-
-      const res = await download(other.public_id).expect(409);
-
-      expect((res.body as { error: string }).error).toBe('VIDEO_NOT_READY');
-    },
-  );
-
-  it('should answer VIDEO_NOT_FOUND for an unknown public_id', async () => {
+  it('video-inexistente', async () => {
     const res = await download('aaaaaaaaaaa').expect(404);
 
     expect((res.body as { error: string }).error).toBe('VIDEO_NOT_FOUND');
