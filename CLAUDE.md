@@ -8,11 +8,11 @@ More info in the project overview: [docs/project-plan.md](docs/project-plan.md)
 
 ## Repository Structure
 
-This is a monorepo with two main areas:
+This is a monorepo with three main areas:
 
 - `nestjs-project/` — Backend (NestJS 11, TypeScript, Express). One package with two processes: the API (`src/main.ts`) and the video worker (`src/worker.ts`). Contains modules for users, channels, videos, storage and queue; comments and the other social modules come in later phases.
 - `docs/` — Project documentation, architecture diagrams, and planning.
-- `next-frontend/` (Next.js) — not yet initialized
+- `next-frontend/` — Frontend (Next.js 16, App Router, BFF model) from Phases 01–02: the sign-up, login and forgot-password screens (`app/(auth)/`) and the auth Route Handlers that proxy the API (`app/api/auth/`). It has its own `CLAUDE.md` and Compose stack. The video phases (03 onwards) are backend-only: their UI is out of scope.
 
 ## Architecture (C4 Container Diagram)
 
