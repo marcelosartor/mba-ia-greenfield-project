@@ -141,7 +141,7 @@ Entregar a API de gerenciamento de vídeos e do canal: categorias de vídeo disp
 ### SI-04.5 — Endpoint GET /categories
 
 **Route:** GET /categories
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/categories-list.plan.md`
 **Authorization:** Anonymous — pública, throttler `public-read` (per `### Authorization Matrix`)
 
 **Description:** Expõe a lista de categorias da plataforma sem autenticação, para o cliente oferecer a escolha na edição do vídeo.
@@ -198,7 +198,7 @@ Entregar a API de gerenciamento de vídeos e do canal: categorias de vídeo disp
 ### SI-04.7 — Endpoint GET /videos/{public_id} (acesso por publicação e contrato ampliado)
 
 **Route:** GET /videos/{public_id}
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-get.plan.md`
 **Authorization:** Optional — publicado para todos, rascunho só para o dono (per `### Authorization Matrix`)
 
 **Description:** Aplica a regra de acesso da fase à leitura de metadados (rascunho só para o dono, na ordem `404` antes de `409`) e devolve a representação ampliada do vídeo, com cache privado.
@@ -232,7 +232,7 @@ Entregar a API de gerenciamento de vídeos e do canal: categorias de vídeo disp
 ### SI-04.8 — Endpoint GET /videos/{public_id}/stream (acesso por publicação)
 
 **Route:** GET /videos/{public_id}/stream
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-stream.plan.md`
 **Authorization:** Optional — publicado para todos, rascunho só para o dono (per `### Authorization Matrix`)
 
 **Description:** Aplica ao streaming a mesma regra de acesso dos metadados, sem mudar o comportamento de `Range`/206 nem carregar o arquivo em memória.
@@ -261,7 +261,7 @@ Entregar a API de gerenciamento de vídeos e do canal: categorias de vídeo disp
 ### SI-04.9 — Endpoint GET /videos/{public_id}/download (acesso por publicação)
 
 **Route:** GET /videos/{public_id}/download
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-download.plan.md`
 **Authorization:** Optional — publicado para todos, rascunho só para o dono (per `### Authorization Matrix`)
 
 **Description:** Aplica ao download a mesma regra de acesso dos metadados e o cache privado, mantendo o arquivo em stream.
@@ -290,7 +290,7 @@ Entregar a API de gerenciamento de vídeos e do canal: categorias de vídeo disp
 ### SI-04.10 — Endpoint PATCH /videos/{public_id}
 
 **Route:** PATCH /videos/{public_id}
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-update.plan.md`
 **Authorization:** Owner — dono do canal do vídeo; throttler `authenticated` (per `### Authorization Matrix`)
 
 **Description:** Deixa o dono editar título, descrição, categoria e visibilidade de um vídeo seu, de forma parcial e em qualquer status de processamento, recusando corpo vazio e campos que o cliente não pode escrever.
@@ -330,7 +330,7 @@ Entregar a API de gerenciamento de vídeos e do canal: categorias de vídeo disp
 ### SI-04.11 — Endpoint POST /videos/{public_id}/publication
 
 **Route:** POST /videos/{public_id}/publication
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-publish.plan.md`
 **Authorization:** Owner — dono do canal do vídeo; throttler `authenticated` (per `### Authorization Matrix`)
 
 **Description:** Publica um vídeo pronto, com visibilidade pública por padrão ou não listada, gravando o instante da publicação a cada chamada.
@@ -365,7 +365,7 @@ Entregar a API de gerenciamento de vídeos e do canal: categorias de vídeo disp
 ### SI-04.12 — Endpoint DELETE /videos/{public_id}/publication
 
 **Route:** DELETE /videos/{public_id}/publication
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-unpublish.plan.md`
 **Authorization:** Owner — dono do canal do vídeo; throttler `authenticated` (per `### Authorization Matrix`)
 
 **Description:** Despublica um vídeo, que volta a rascunho e deixa de ser lido por quem não é o dono, de forma idempotente.
@@ -426,7 +426,7 @@ Entregar a API de gerenciamento de vídeos e do canal: categorias de vídeo disp
 ### SI-04.14 — Endpoint GET /videos/{public_id}/thumbnail
 
 **Route:** GET /videos/{public_id}/thumbnail
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-thumbnail-get.plan.md`
 **Authorization:** Optional — publicado para todos, rascunho só para o dono; throttler `public-read` (per `### Authorization Matrix`)
 
 **Description:** Serve a capa do vídeo — a customizada se existir, senão a gerada pelo worker — em stream do storage, com as regras de acesso do vídeo.
@@ -457,7 +457,7 @@ Entregar a API de gerenciamento de vídeos e do canal: categorias de vídeo disp
 ### SI-04.15 — Endpoint PUT /videos/{public_id}/thumbnail
 
 **Route:** PUT /videos/{public_id}/thumbnail
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-thumbnail-set.plan.md`
 **Authorization:** Owner — dono do canal do vídeo; throttler `uploads` (per `### Authorization Matrix`)
 
 **Description:** Deixa o dono trocar a capa do vídeo por uma imagem própria, validada pelo conteúdo e regravada antes de chegar ao storage, sem que o worker jamais a sobrescreva.
@@ -492,7 +492,7 @@ Entregar a API de gerenciamento de vídeos e do canal: categorias de vídeo disp
 ### SI-04.16 — Endpoint DELETE /videos/{public_id}/thumbnail
 
 **Route:** DELETE /videos/{public_id}/thumbnail
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-thumbnail-delete.plan.md`
 **Authorization:** Owner — dono do canal do vídeo; throttler `uploads` (per `### Authorization Matrix`)
 
 **Description:** Remove a capa customizada e devolve o vídeo à capa gerada pelo worker, de forma idempotente.
@@ -581,7 +581,7 @@ Entregar a API de gerenciamento de vídeos e do canal: categorias de vídeo disp
 ### SI-04.19 — Endpoint PATCH /channels/me
 
 **Route:** PATCH /channels/me
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/channels-update-me.plan.md`
 **Authorization:** Authenticated — só o canal do usuário do JWT; throttler `authenticated` (per `### Authorization Matrix`)
 
 **Description:** Deixa o dono editar nickname, nome e descrição do próprio canal, com o conflito de nickname decidido pelo banco, inclusive sob concorrência.
@@ -616,7 +616,7 @@ Entregar a API de gerenciamento de vídeos e do canal: categorias de vídeo disp
 ### SI-04.20 — Endpoint GET /channels/{nickname}
 
 **Route:** GET /channels/{nickname}
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/channels-get.plan.md`
 **Authorization:** Anonymous — pública, throttler `public-read` (per `### Authorization Matrix`)
 
 **Description:** Expõe as informações públicas de um canal pelo nickname, com a contagem de vídeos listáveis, sem dados do usuário.
@@ -648,7 +648,7 @@ Entregar a API de gerenciamento de vídeos e do canal: categorias de vídeo disp
 ### SI-04.21 — Endpoint GET /channels/me/videos (painel)
 
 **Route:** GET /channels/me/videos
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/channels-me-videos.plan.md`
 **Authorization:** Authenticated — só o canal do usuário do JWT; throttler `authenticated` (per `### Authorization Matrix`)
 
 **Description:** Entrega ao dono a listagem paginada de todos os vídeos do próprio canal, em qualquer status, com as informações de gestão de onde ele parte para a edição.
@@ -676,7 +676,7 @@ Entregar a API de gerenciamento de vídeos e do canal: categorias de vídeo disp
 ### SI-04.22 — Endpoint GET /channels/{nickname}/videos
 
 **Route:** GET /channels/{nickname}/videos
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/channels-videos.plan.md`
 **Authorization:** Anonymous — pública, só vídeos listáveis; throttler `public-read` (per `### Authorization Matrix`)
 
 **Description:** Lista publicamente os vídeos publicados e públicos de um canal, mais recentes primeiro, com paginação.
