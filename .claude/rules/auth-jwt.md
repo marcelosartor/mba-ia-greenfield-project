@@ -65,5 +65,10 @@ This module is responsible for registering `JwtAuthGuard` as `APP_GUARD`. The de
 
 ## Rate Limiting
 
-- Rate limits on auth endpoints are enforced by the global `ThrottlerGuard`.
+- The global `ThrottlerGuard` (registered in `AuthModule` **after** `JwtAuthGuard`, so `req.user` is set) runs four named throttlers configured in `src/throttling/` (`ThrottlingModule`, `throttling.options.ts`). Each counts only on its own route class:
+  - `default` — 10/min per IP, on routes **with no throttle class**: the public auth routes (register, confirm-email, resend-confirmation, login, refresh, forgot-password, reset-password). An unclassified new route falls here, the strictest limit.
+  - `public-read` — `THROTTLE_PUBLIC_READ_LIMIT`/min per IP (default 300), on routes marked `@PublicReadThrottle()`.
+  - `authenticated` — 120/min per user (`sub` of the JWT), on routes marked `@AuthenticatedThrottle()`.
+  - `uploads` — 20/min per user, on routes marked `@UploadsThrottle()` (video upload and custom thumbnail).
+- Every new route must pick its class with one of the decorators in `src/throttling/throttle-class.decorator.ts`. Routes a client calls repeatedly with no budget (the video metadata/stream/download reads, `GET /`) use `@SkipThrottle()` and no class, which skips every throttler.
 - E2E tests for non-throttled endpoints must clear the throttler storage in `beforeEach` to avoid leaking 429s across describe blocks. See `.claude/rules/nestjs-testing.md` for the override pattern.

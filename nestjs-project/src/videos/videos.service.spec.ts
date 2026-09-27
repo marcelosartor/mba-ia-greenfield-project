@@ -1,91 +1,95 @@
-import {
-  VideoNotFoundException,
-  VideoNotReadyException,
-} from '../common/exceptions/domain.exception';
+import { BadRequestException } from '@nestjs/common';
+import type { CategoriesService } from '../categories/categories.service';
+import { InvalidCategoryException } from '../common/exceptions/domain.exception';
 import type { Video } from './entities/video.entity';
+import type { VideoAccessService } from './video-access.service';
+import type { VideoOwnershipService } from './video-ownership.service';
 import { VideoStatus } from './video-status.enum';
+import { VideoVisibility } from './video-visibility.enum';
 import { VideosService } from './videos.service';
 import type { VideosRepository } from './videos.repository';
 
-const createdAt = new Date('2026-09-20T12:00:00Z');
+const owned = {
+  id: 'video-1',
+  public_id: 'abcdefghijk',
+  title: 'Old',
+  status: VideoStatus.PROCESSING,
+  visibility: VideoVisibility.PUBLIC,
+  category: null,
+} as unknown as Video;
 
-const makeVideo = (overrides: Partial<Video> = {}): Video =>
-  ({
-    id: 'internal-uuid',
-    public_id: 'abcdefghijk',
-    channel_id: 'channel-1',
-    title: 'Holiday',
-    status: VideoStatus.READY,
-    video_key: 'channel-1/internal-uuid/source.mp4',
-    thumbnail_key: 'internal-uuid/default.jpg',
-    upload_id: null,
-    duration_seconds: 12.5,
-    width: 640,
-    height: 360,
-    created_at: createdAt,
-    ...overrides,
-  }) as Video;
-
-describe('VideosService', () => {
-  let repository: { findByPublicId: jest.Mock };
+describe('VideosService.update', () => {
+  let ownership: { loadOwned: jest.Mock };
+  let repository: {
+    updateEditableFields: jest.Mock;
+    findByPublicIdWithRelations: jest.Mock;
+  };
+  let categories: { findBySlug: jest.Mock };
   let service: VideosService;
 
   beforeEach(() => {
-    repository = { findByPublicId: jest.fn() };
-    service = new VideosService(repository as unknown as VideosRepository);
+    ownership = { loadOwned: jest.fn().mockResolvedValue(owned) };
+    repository = {
+      updateEditableFields: jest.fn().mockResolvedValue(undefined),
+      findByPublicIdWithRelations: jest.fn().mockResolvedValue(owned),
+    };
+    categories = { findBySlug: jest.fn() };
+    service = new VideosService(
+      {} as VideoAccessService,
+      ownership as unknown as VideoOwnershipService,
+      repository as unknown as VideosRepository,
+      categories as unknown as CategoriesService,
+    );
   });
 
-  describe('getReadyVideo', () => {
-    it('should return only the public metadata of a ready video', async () => {
-      repository.findByPublicId.mockResolvedValue(makeVideo());
+  it('rejects an empty body before touching the video', async () => {
+    await expect(
+      service.update('user-a', 'abcdefghijk', {}),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(ownership.loadOwned).not.toHaveBeenCalled();
+  });
 
-      const result = await service.getReadyVideo('abcdefghijk');
+  it('rejects an unknown category slug without writing', async () => {
+    categories.findBySlug.mockResolvedValue(null);
 
-      expect(repository.findByPublicId).toHaveBeenCalledWith('abcdefghijk');
-      expect(result).toEqual({
-        public_id: 'abcdefghijk',
-        title: 'Holiday',
-        status: 'ready',
-        duration_seconds: 12.5,
-        width: 640,
-        height: 360,
-        created_at: createdAt,
-      });
-    });
+    await expect(
+      service.update('user-a', 'abcdefghijk', { category: 'inexistente' }),
+    ).rejects.toBeInstanceOf(InvalidCategoryException);
+    expect(repository.updateEditableFields).not.toHaveBeenCalled();
+  });
 
-    it('should not leak storage keys or internal ids', async () => {
-      repository.findByPublicId.mockResolvedValue(makeVideo());
+  it('resolves the category slug to its id', async () => {
+    categories.findBySlug.mockResolvedValue({ id: 'cat-1', slug: 'musica' });
 
-      const result = await service.getReadyVideo('abcdefghijk');
+    await service.update('user-a', 'abcdefghijk', { category: 'musica' });
 
-      expect(Object.keys(result).sort()).toEqual([
-        'created_at',
-        'duration_seconds',
-        'height',
-        'public_id',
-        'status',
-        'title',
-        'width',
-      ]);
-    });
-
-    it('should throw VideoNotFoundException when the public_id does not exist', async () => {
-      repository.findByPublicId.mockResolvedValue(null);
-
-      await expect(service.getReadyVideo('aaaaaaaaaaa')).rejects.toBeInstanceOf(
-        VideoNotFoundException,
-      );
-    });
-
-    it.each([VideoStatus.DRAFT, VideoStatus.PROCESSING, VideoStatus.ERROR])(
-      'should throw VideoNotReadyException for a video in %s',
-      async (status) => {
-        repository.findByPublicId.mockResolvedValue(makeVideo({ status }));
-
-        await expect(
-          service.getReadyVideo('abcdefghijk'),
-        ).rejects.toBeInstanceOf(VideoNotReadyException);
-      },
+    expect(repository.updateEditableFields).toHaveBeenCalledWith(
+      'video-1',
+      expect.objectContaining({ category_id: 'cat-1' }),
     );
+  });
+
+  it('clears the category with null, without looking it up', async () => {
+    await service.update('user-a', 'abcdefghijk', { category: null });
+
+    expect(categories.findBySlug).not.toHaveBeenCalled();
+    expect(repository.updateEditableFields).toHaveBeenCalledWith(
+      'video-1',
+      expect.objectContaining({ category_id: null }),
+    );
+  });
+
+  it('sends only the fields that came in the body', async () => {
+    await service.update('user-a', 'abcdefghijk', { description: null });
+
+    const [, changes] = repository.updateEditableFields.mock.calls[0] as [
+      string,
+      Record<string, unknown>,
+    ];
+    expect(changes).toEqual({
+      title: undefined,
+      description: null,
+      visibility: undefined,
+    });
   });
 });

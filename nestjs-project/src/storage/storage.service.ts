@@ -2,6 +2,7 @@ import {
   AbortMultipartUploadCommand,
   CompleteMultipartUploadCommand,
   CreateMultipartUploadCommand,
+  DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
   ListPartsCommand,
@@ -209,6 +210,13 @@ export class StorageService {
           ContentType: contentType,
         }),
       ),
+    );
+  }
+
+  /** Removes an object; deleting a key that does not exist is not an error. */
+  async deleteObject(bucket: string, key: string): Promise<void> {
+    await this.run(() =>
+      this.client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key })),
     );
   }
 

@@ -79,6 +79,64 @@ describe('Swagger endpoints (e2e)', () => {
       });
     });
 
+    it('documents the Phase 04 operations with the security of the Authorization Matrix', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/docs-json')
+        .expect(200);
+      const paths = (
+        res.body as {
+          paths: Record<
+            string,
+            Record<
+              string,
+              { security?: unknown; responses: Record<string, unknown> }
+            >
+          >;
+        }
+      ).paths;
+      const op = (method: string, path: string) => paths[path]?.[method];
+
+      const publicOps: [string, string][] = [
+        ['get', '/categories'],
+        ['get', '/channels/{nickname}'],
+        ['get', '/channels/{nickname}/videos'],
+      ];
+      const optionalOps: [string, string][] = [
+        ['get', '/videos/{public_id}'],
+        ['get', '/videos/{public_id}/stream'],
+        ['get', '/videos/{public_id}/download'],
+        ['get', '/videos/{public_id}/thumbnail'],
+      ];
+      const protectedOps: [string, string][] = [
+        ['patch', '/videos/{public_id}'],
+        ['post', '/videos/{public_id}/publication'],
+        ['delete', '/videos/{public_id}/publication'],
+        ['put', '/videos/{public_id}/thumbnail'],
+        ['delete', '/videos/{public_id}/thumbnail'],
+        ['get', '/channels/me/videos'],
+        ['patch', '/channels/me'],
+      ];
+
+      for (const [method, path] of publicOps) {
+        expect(op(method, path)).toBeDefined();
+        expect(op(method, path)?.security).toBeUndefined();
+      }
+      for (const [method, path] of optionalOps) {
+        expect(op(method, path)?.security).toEqual(
+          expect.arrayContaining([{}, { 'access-token': [] }]),
+        );
+      }
+      for (const [method, path] of protectedOps) {
+        expect(op(method, path)?.security).toEqual([{ 'access-token': [] }]);
+      }
+      expect(
+        Object.keys(op('put', '/videos/{public_id}/thumbnail').responses),
+      ).toEqual(expect.arrayContaining(['413', '415']));
+      expect(Object.keys(op('patch', '/channels/me').responses)).toEqual(
+        expect.arrayContaining(['400', '409']),
+      );
+    });
+
     it('GET /api/docs-yaml returns 200 with YAML content', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/docs-yaml')

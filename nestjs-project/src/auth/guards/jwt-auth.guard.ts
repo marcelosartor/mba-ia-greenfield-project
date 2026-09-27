@@ -8,6 +8,7 @@ import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { BEARER_PREFIX } from '../auth.constants';
 import { JwtPayload } from '../auth.types';
+import { IS_OPTIONAL_AUTH_KEY } from '../decorators/optional-auth.decorator';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 
 @Injectable()
@@ -18,29 +19,47 @@ export class JwtAuthGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
+    const targets = [context.getHandler(), context.getClass()];
+    const isPublic = this.reflector.getAllAndOverride<boolean>(
+      IS_PUBLIC_KEY,
+      targets,
+    );
     if (isPublic) return true;
 
     const request = context
       .switchToHttp()
       .getRequest<{ headers: Record<string, string>; user: unknown }>();
-    const authHeader = request.headers?.authorization;
 
-    if (!authHeader || !authHeader.startsWith(BEARER_PREFIX)) {
-      throw new UnauthorizedException();
+    const isOptional = this.reflector.getAllAndOverride<boolean>(
+      IS_OPTIONAL_AUTH_KEY,
+      targets,
+    );
+    if (isOptional) {
+      // Only the Authorization header counts: never a query string or cookie.
+      const payload = await this.verify(request.headers?.authorization);
+      if (payload) request.user = payload;
+      return true;
     }
 
-    const token = authHeader.slice(BEARER_PREFIX.length);
-
-    try {
-      const payload = await this.jwtService.verifyAsync<JwtPayload>(token);
-      request.user = payload;
-      return true;
-    } catch {
+    const payload = await this.verify(request.headers?.authorization);
+    if (!payload) {
       throw new UnauthorizedException();
+    }
+    request.user = payload;
+    return true;
+  }
+
+  private async verify(
+    authHeader: string | undefined,
+  ): Promise<JwtPayload | null> {
+    if (!authHeader || !authHeader.startsWith(BEARER_PREFIX)) {
+      return null;
+    }
+    const token = authHeader.slice(BEARER_PREFIX.length);
+    try {
+      return await this.jwtService.verifyAsync<JwtPayload>(token);
+    } catch {
+      return null;
     }
   }
 }

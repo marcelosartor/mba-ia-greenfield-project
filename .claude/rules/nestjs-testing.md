@@ -52,7 +52,7 @@ ConfigModule.forRoot({ isGlobal: true, load: [someConfig] })
 
 because `useClass` instantiates a fresh `SomeGuard`, not the provider token you overrode. Two correct strategies:
 
-1. **Override the storage / state token** the guard depends on. Example: for `@nestjs/throttler`, inject `ThrottlerStorage` (a `Symbol` token) from the test module and call `storage.clear()` in `beforeEach` of every describe block that exercises rate-limited endpoints. This isolates state without faking the guard.
+1. **Override the storage / state token** the guard depends on. Example: for `@nestjs/throttler`, inject `ThrottlerStorage` (a `Symbol` token) from the test module and call `storage.clear()` in `beforeEach` of every describe block that exercises rate-limited endpoints. This isolates state without faking the guard. The four named throttlers (`default`, `public-read`, `authenticated`, `uploads`) share this one storage, so a single `clear()` resets all of them; the counter key is per route, per throttler and per tracker (IP or user).
 2. **Register the guard via `useExisting`** in test modules so `overrideProvider` can target it. Reserve this for cases where strategy 1 is impractical.
 
 ## Mocking `dataSource.transaction(callback)`

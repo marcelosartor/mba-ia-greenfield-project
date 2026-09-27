@@ -40,4 +40,7 @@ export const envValidationSchema = Joi.object({
     .integer()
     .min(1000)
     .default(1800000),
+  VIDEO_THUMBNAIL_MAX_PIXELS: Joi.number().integer().min(1).default(16777216),
+  VIDEO_THUMBNAIL_TIMEOUT_MS: Joi.number().integer().min(1).default(5000),
+  THROTTLE_PUBLIC_READ_LIMIT: Joi.number().integer().min(1).default(300),
 });

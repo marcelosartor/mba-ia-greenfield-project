@@ -24,20 +24,22 @@ import {
 import { User } from '../src/users/entities/user.entity';
 import { Video } from '../src/videos/entities/video.entity';
 import { VideoStatus } from '../src/videos/video-status.enum';
-import { createE2eApp } from './helpers/e2e-app';
+import { createE2eApp, registerConfirmAndLogin } from './helpers/e2e-app';
 
 jest.setTimeout(180000);
 
 const MIB = 1024 * 1024;
 const SMALL_SIZE = 3 * MIB;
 
-describe('GET /videos/:public_id/stream (e2e)', () => {
+describe('videos-stream', () => {
   let app: INestApplication<App>;
   let dataSource: DataSource;
   let storage: StorageService;
   let cleanupClient: S3Client;
   let channel: Channel;
   let small: { video: Video; content: Buffer };
+  let tokenA: string;
+  let tokenB: string;
 
   beforeAll(async () => {
     app = await createE2eApp();
@@ -54,12 +56,14 @@ describe('GET /videos/:public_id/stream (e2e)', () => {
   beforeEach(async () => {
     await cleanAllTables(dataSource);
     app.get<ThrottlerStorageService>(ThrottlerStorage).storage.clear();
-    const user = await dataSource
+    tokenA = await registerConfirmAndLogin(app, 'owner-a@example.com');
+    tokenB = await registerConfirmAndLogin(app, 'other-b@example.com');
+    const owner = await dataSource
       .getRepository(User)
-      .save({ email: 'owner-a@example.com', password: 'hashed' });
+      .findOneByOrFail({ email: 'owner-a@example.com' });
     channel = await dataSource
       .getRepository(Channel)
-      .save({ name: 'Owner A', nickname: 'ownera', user_id: user.id });
+      .findOneByOrFail({ user_id: owner.id });
     small = await seedVideo(SMALL_SIZE);
   });
 
@@ -75,10 +79,13 @@ describe('GET /videos/:public_id/stream (e2e)', () => {
   });
 
   let counter = 0;
-  // The worker does not run here: a ready video is seeded with a real object.
+  // The worker and the publication do not run here: a video is seeded with a
+  // real object, published unless `published` is false (only a ready video
+  // can be published).
   const seedVideo = async (
     sizeBytes: number,
     status: VideoStatus = VideoStatus.READY,
+    published = status === VideoStatus.READY,
   ): Promise<{ video: Video; content: Buffer }> => {
     const publicId = `stream${String(++counter).padStart(5, '0')}`;
     const content = randomContent(sizeBytes);
@@ -87,6 +94,7 @@ describe('GET /videos/:public_id/stream (e2e)', () => {
       channel_id: channel.id,
       title: 'Streamed',
       status,
+      published_at: published ? new Date() : null,
       video_key: `${channel.id}/${publicId}/source.mp4`,
     });
     await storage.putObject(
@@ -98,22 +106,25 @@ describe('GET /videos/:public_id/stream (e2e)', () => {
     return { video, content };
   };
 
-  const stream = (publicId: string, range?: string) => {
-    const req = request(app.getHttpServer()).get(`/videos/${publicId}/stream`);
-    return range ? req.set('Range', range) : req;
+  const stream = (publicId: string, range?: string, token?: string) => {
+    let req = request(app.getHttpServer()).get(`/videos/${publicId}/stream`);
+    if (range) req = req.set('Range', range);
+    if (token) req = req.set('Authorization', `Bearer ${token}`);
+    return req;
   };
 
   // Reads the body as a stream, never accumulating it.
   const digestBody = (
     publicId: string,
     range?: string,
+    token?: string,
   ): Promise<{
     status: number;
     headers: Record<string, string>;
     digest: StreamDigest;
   }> =>
     new Promise((resolve, reject) => {
-      stream(publicId, range)
+      stream(publicId, range, token)
         .maxResponseSize(1024 * MIB) // superagent stops at 200 MB by default
         .buffer(true) // the parser below consumes the body; nothing accumulates
         .parse((res, callback) => {
@@ -131,7 +142,9 @@ describe('GET /videos/:public_id/stream (e2e)', () => {
         });
     });
 
-  it('should answer 206 with exactly the first kilobyte for Range bytes=0-1023', async () => {
+  // 1. Transmitir o vídeo conforme a publicação
+
+  it('primeiro-quilobyte-por-range-em-video-publicado', async () => {
     const res = await stream(small.video.public_id, 'bytes=0-1023')
       .buffer(true)
       .parse((r, callback) => {
@@ -143,22 +156,42 @@ describe('GET /videos/:public_id/stream (e2e)', () => {
 
     expect(res.headers['content-range']).toBe(`bytes 0-1023/${SMALL_SIZE}`);
     expect(res.headers['content-length']).toBe('1024');
+    expect(res.headers['cache-control']).toBe('private, no-cache');
     expect(res.body).toEqual(small.content.subarray(0, 1024));
   });
 
-  it('should answer 200 with the whole file and its hash without a Range', async () => {
+  it('rascunho-so-para-o-dono', async () => {
+    const draft = await seedVideo(SMALL_SIZE, VideoStatus.READY, false);
+
+    for (const token of [undefined, tokenB]) {
+      const res = await stream(draft.video.public_id, undefined, token).expect(
+        404,
+      );
+      expect((res.body as { error: string }).error).toBe('VIDEO_NOT_FOUND');
+    }
+
+    const { status, digest } = await digestBody(
+      draft.video.public_id,
+      undefined,
+      tokenA,
+    );
+    expect(status).toBe(200);
+    expect(digest.sha256).toBe(sha256(draft.content));
+  });
+
+  it('stream-completo-sem-range', async () => {
     const { status, headers, digest } = await digestBody(small.video.public_id);
 
     expect(status).toBe(200);
     expect(headers['accept-ranges']).toBe('bytes');
     expect(headers['content-length']).toBe(String(SMALL_SIZE));
     expect(headers['content-type']).toBe('video/mp4');
-    expect(headers['cache-control']).toBe('no-cache');
+    expect(headers['cache-control']).toBe('private, no-cache');
     expect(headers.etag).toBeTruthy();
     expect(digest.sha256).toBe(sha256(small.content));
   });
 
-  it('should serve any part of the file, like a player seeking', async () => {
+  it('busca-em-qualquer-ponto-do-arquivo', async () => {
     const { status, headers, digest } = await digestBody(
       small.video.public_id,
       `bytes=${SMALL_SIZE - 1000}-`,
@@ -173,7 +206,7 @@ describe('GET /videos/:public_id/stream (e2e)', () => {
     );
   });
 
-  it('should ignore a Range that is not a single byte range', async () => {
+  it('ignora-range-com-mais-de-um-intervalo', async () => {
     const { status, headers } = await digestBody(
       small.video.public_id,
       'bytes=0-10,20-30',
@@ -183,7 +216,7 @@ describe('GET /videos/:public_id/stream (e2e)', () => {
     expect(headers['content-length']).toBe(String(SMALL_SIZE));
   });
 
-  it('should answer 416 INVALID_RANGE with Content-Range bytes */total', async () => {
+  it('range-nao-satisfatorio', async () => {
     const res = await stream(
       small.video.public_id,
       'bytes=9999999-10000000',
@@ -193,24 +226,24 @@ describe('GET /videos/:public_id/stream (e2e)', () => {
     expect(res.headers['content-range']).toBe(`bytes */${SMALL_SIZE}`);
   });
 
-  it.each([VideoStatus.DRAFT, VideoStatus.PROCESSING, VideoStatus.ERROR])(
-    'should answer VIDEO_NOT_READY for a video in %s',
-    async (status) => {
+  it('nao-pronto-e-inexistente', async () => {
+    for (const status of [
+      VideoStatus.DRAFT,
+      VideoStatus.PROCESSING,
+      VideoStatus.ERROR,
+    ]) {
       const { video } = await seedVideo(1024, status);
 
-      const res = await stream(video.public_id).expect(409);
+      const res = await stream(video.public_id, undefined, tokenA).expect(409);
 
       expect((res.body as { error: string }).error).toBe('VIDEO_NOT_READY');
-    },
-  );
+    }
 
-  it('should answer VIDEO_NOT_FOUND for an unknown public_id', async () => {
     const res = await stream('aaaaaaaaaaa').expect(404);
-
     expect((res.body as { error: string }).error).toBe('VIDEO_NOT_FOUND');
   });
 
-  it('should stream 200 MiB without growing the heap near the file size', async () => {
+  it('stream-nao-bufferiza-o-arquivo', async () => {
     const size = 200 * MIB;
     const { video, content } = await seedVideo(size);
     const head = await storage.headObject(
@@ -230,7 +263,7 @@ describe('GET /videos/:public_id/stream (e2e)', () => {
     expect(process.memoryUsage().heapUsed - heapBefore).toBeLessThan(50 * MIB);
   });
 
-  it('should stop reading the storage when the client goes away', async () => {
+  it('para-de-ler-o-storage-quando-o-cliente-sai', async () => {
     const { video } = await seedVideo(40 * MIB);
     let storageBody: Readable | undefined;
     const original = storage.getObjectRange.bind(

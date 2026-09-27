@@ -455,6 +455,339 @@
         ]
       }
     },
+    "/channels/me": {
+      "patch": {
+        "description": "Partial edit of the caller's channel: nickname, name and description. Changing the nickname changes the public address, with no redirect.",
+        "operationId": "ChannelsController_updateMine",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateChannelDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Empty body, unknown field or invalid value (VALIDATION_ERROR), or reserved nickname (NICKNAME_RESERVED)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Authenticated user has no channel (CHANNEL_NOT_FOUND)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Nickname already used by another channel (NICKNAME_ALREADY_EXISTS)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Edit my channel",
+        "tags": [
+          "channels"
+        ]
+      }
+    },
+    "/channels/me/videos": {
+      "get": {
+        "description": "Every video of the caller's channel, in any status, newest first (created_at, then id), paginated. `views`, `likes` and `comments` are always 0 until Phases 05 and 06. There is no channel parameter and no filter.",
+        "operationId": "ChannelsController_listMyVideos",
+        "parameters": [
+          {
+            "name": "page",
+            "required": true,
+            "in": "query",
+            "description": "1-based page number.",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "limit",
+            "required": true,
+            "in": "query",
+            "description": "Items per page, 1 to 50.",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of the panel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedPanelVideosDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid page or limit (VALIDATION_ERROR)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Authenticated user has no channel (CHANNEL_NOT_FOUND)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "List my videos (management panel)",
+        "tags": [
+          "channels"
+        ]
+      }
+    },
+    "/channels/{nickname}": {
+      "get": {
+        "description": "Public page of a channel by its nickname: name, description, creation date and the number of published public videos. Never the id, user id or e-mail.",
+        "operationId": "ChannelsController_getChannel",
+        "parameters": [
+          {
+            "name": "nickname",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicChannelResponseDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No channel with this nickname (CHANNEL_NOT_FOUND)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (public-read limit per IP)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get a channel",
+        "tags": [
+          "channels"
+        ]
+      }
+    },
+    "/channels/{nickname}/videos": {
+      "get": {
+        "description": "Published public videos of the channel, newest first (published_at, then id), paginated. Unlisted videos and drafts never appear here.",
+        "operationId": "ChannelsController_listChannelVideos",
+        "parameters": [
+          {
+            "name": "nickname",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "required": true,
+            "in": "query",
+            "description": "1-based page number.",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "limit",
+            "required": true,
+            "in": "query",
+            "description": "Items per page, 1 to 50.",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of the public listing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedPublicVideosDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid page or limit (VALIDATION_ERROR)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No channel with this nickname (CHANNEL_NOT_FOUND)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (public-read limit per IP)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List a channel's public videos",
+        "tags": [
+          "channels"
+        ]
+      }
+    },
+    "/categories": {
+      "get": {
+        "description": "Categories maintained by the platform, ordered by name with `outros` last. The client uses the `slug` when editing a video.",
+        "operationId": "CategoriesController_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Categories",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CategoryResponseDto"
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (public-read limit per IP)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List the video categories",
+        "tags": [
+          "categories"
+        ]
+      }
+    },
     "/videos": {
       "post": {
         "description": "Creates the video as a draft in the authenticated user's channel and opens the multipart upload in the object storage. The part size is defined by the server.",
@@ -859,7 +1192,7 @@
     },
     "/videos/{public_id}": {
       "get": {
-        "description": "Public metadata of a video, by its public identifier. Only videos that finished processing (`ready`) are served.",
+        "description": "Metadata of a video, by its public identifier. A published video is readable by anyone; a draft only by the owner of its channel (anyone else gets 404). A video that is not `ready` is a 409, which only the owner reaches. The token is optional and only read from the `Authorization` header.",
         "operationId": "VideosController_getVideo",
         "parameters": [
           {
@@ -875,11 +1208,198 @@
         ],
         "responses": {
           "200": {
-            "description": "Video metadata",
+            "description": "Video metadata (`Cache-Control: private, no-cache`)",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/VideoResponseDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Video not found, or a draft requested by someone other than the owner (VIDEO_NOT_FOUND)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Video is still processing or in error, requested by the owner (VIDEO_NOT_READY)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {},
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Get a video",
+        "tags": [
+          "videos"
+        ]
+      },
+      "patch": {
+        "description": "Partial edit of title, description, category (by slug) and visibility by the owner, in any processing status. An omitted field is not changed and `null` clears description or category; changing the visibility does not change `published_at`. The last write wins.",
+        "operationId": "VideosController_updateVideo",
+        "parameters": [
+          {
+            "name": "public_id",
+            "required": true,
+            "in": "path",
+            "description": "Public identifier of the video (11 URL-safe characters)",
+            "schema": {
+              "example": "dQw4w9WgXcQ",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateVideoDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated video",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Empty body, unknown field or invalid value (VALIDATION_ERROR), or unknown category slug (INVALID_CATEGORY)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The video belongs to another channel (VIDEO_ACCESS_DENIED)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Video not found (VIDEO_NOT_FOUND)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Edit a video",
+        "tags": [
+          "videos"
+        ]
+      }
+    },
+    "/videos/{public_id}/publication": {
+      "post": {
+        "description": "Publishes a video that finished processing, `public` by default or `unlisted`. Every call writes `published_at` again (republishing refreshes it). Owner only.",
+        "operationId": "VideosController_publishVideo",
+        "parameters": [
+          {
+            "name": "public_id",
+            "required": true,
+            "in": "path",
+            "description": "Public identifier of the video (11 URL-safe characters)",
+            "schema": {
+              "example": "dQw4w9WgXcQ",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishVideoDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The published video",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid visibility or unknown field (VALIDATION_ERROR)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The video belongs to another channel (VIDEO_ACCESS_DENIED)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
                 }
               }
             }
@@ -895,7 +1415,7 @@
             }
           },
           "409": {
-            "description": "Video is draft, processing or in error (VIDEO_NOT_READY)",
+            "description": "The video is not ready yet (VIDEO_NOT_PUBLISHABLE)",
             "content": {
               "application/json": {
                 "schema": {
@@ -905,7 +1425,72 @@
             }
           }
         },
-        "summary": "Get a video",
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Publish a video",
+        "tags": [
+          "videos"
+        ]
+      },
+      "delete": {
+        "description": "Takes the video back to draft: anyone but the owner stops reading it. The visibility is kept. Idempotent (a draft also answers 204). Owner only.",
+        "operationId": "VideosController_unpublishVideo",
+        "parameters": [
+          {
+            "name": "public_id",
+            "required": true,
+            "in": "path",
+            "description": "Public identifier of the video (11 URL-safe characters)",
+            "schema": {
+              "example": "dQw4w9WgXcQ",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Unpublished"
+          },
+          "401": {
+            "description": "Missing or invalid access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The video belongs to another channel (VIDEO_ACCESS_DENIED)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Video not found (VIDEO_NOT_FOUND)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Unpublish a video",
         "tags": [
           "videos"
         ]
@@ -913,7 +1498,7 @@
     },
     "/videos/{public_id}/stream": {
       "get": {
-        "description": "Serves the video file from the object storage without loading it into memory. Supports a single-range `Range` header (206 Partial Content); any other `Range` value is ignored and the whole file is sent.",
+        "description": "Serves the video file from the object storage without loading it into memory, under the same access rules as the metadata: a draft only for the owner (anyone else gets 404), then 409 while not `ready`. Supports a single-range `Range` header (206 Partial Content); any other `Range` value is ignored and the whole file is sent.",
         "operationId": "VideosController_streamVideo",
         "parameters": [
           {
@@ -960,7 +1545,7 @@
             }
           },
           "404": {
-            "description": "Video not found (VIDEO_NOT_FOUND)",
+            "description": "Video not found, or a draft requested by someone other than the owner (VIDEO_NOT_FOUND)",
             "content": {
               "application/json": {
                 "schema": {
@@ -970,7 +1555,7 @@
             }
           },
           "409": {
-            "description": "Video is draft, processing or in error (VIDEO_NOT_READY)",
+            "description": "Video is still processing or in error, requested by the owner (VIDEO_NOT_READY)",
             "content": {
               "application/json": {
                 "schema": {
@@ -1000,6 +1585,12 @@
             }
           }
         },
+        "security": [
+          {},
+          {
+            "access-token": []
+          }
+        ],
         "summary": "Stream a video",
         "tags": [
           "videos"
@@ -1008,7 +1599,7 @@
     },
     "/videos/{public_id}/download": {
       "get": {
-        "description": "Sends the whole video file as an attachment, streamed from the object storage without loading it into memory.",
+        "description": "Sends the whole video file as an attachment, streamed from the object storage without loading it into memory, under the same access rules as the metadata: a draft only for the owner (anyone else gets 404), then 409 while not `ready`.",
         "operationId": "VideosController_downloadVideo",
         "parameters": [
           {
@@ -1035,7 +1626,7 @@
             }
           },
           "404": {
-            "description": "Video not found (VIDEO_NOT_FOUND)",
+            "description": "Video not found, or a draft requested by someone other than the owner (VIDEO_NOT_FOUND)",
             "content": {
               "application/json": {
                 "schema": {
@@ -1045,7 +1636,7 @@
             }
           },
           "409": {
-            "description": "Video is draft, processing or in error (VIDEO_NOT_READY)",
+            "description": "Video is still processing or in error, requested by the owner (VIDEO_NOT_READY)",
             "content": {
               "application/json": {
                 "schema": {
@@ -1065,7 +1656,284 @@
             }
           }
         },
+        "security": [
+          {},
+          {
+            "access-token": []
+          }
+        ],
         "summary": "Download a video",
+        "tags": [
+          "videos"
+        ]
+      }
+    },
+    "/videos/{public_id}/thumbnail": {
+      "get": {
+        "description": "Streams the video's cover: the owner's custom thumbnail if there is one, else the one generated by the worker. Same access rules as the metadata: a draft only for the owner (anyone else gets 404), then 409 while not `ready`.",
+        "operationId": "VideosController_getThumbnail",
+        "parameters": [
+          {
+            "name": "public_id",
+            "required": true,
+            "in": "path",
+            "description": "Public identifier of the video (11 URL-safe characters)",
+            "schema": {
+              "example": "dQw4w9WgXcQ",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The cover as a JPEG (`Cache-Control: private, no-cache`)",
+            "content": {
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Video not found, a draft requested by someone other than the owner, or a video without any cover (VIDEO_NOT_FOUND)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Video is still processing or in error, requested by the owner (VIDEO_NOT_READY)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (public-read limit per IP)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Object storage unavailable (STORAGE_UNAVAILABLE)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {},
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Get the cover of a video",
+        "tags": [
+          "videos"
+        ]
+      },
+      "put": {
+        "description": "Replaces the cover with an image of the owner, in any processing status. The image is validated by its content (JPEG, PNG or static WebP, up to 2 MiB) and re-encoded as a JPEG 640 px wide, without metadata. The worker never overwrites it.",
+        "operationId": "VideosController_setThumbnail",
+        "parameters": [
+          {
+            "name": "public_id",
+            "required": true,
+            "in": "path",
+            "description": "Public identifier of the video (11 URL-safe characters)",
+            "schema": {
+              "example": "dQw4w9WgXcQ",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "JPEG, PNG or static WebP, up to 2 MiB"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Cover replaced"
+          },
+          "400": {
+            "description": "The `file` field is missing (VALIDATION_ERROR)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The video belongs to another channel (VIDEO_ACCESS_DENIED)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Video not found (VIDEO_NOT_FOUND)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The image exceeds 2 MiB (IMAGE_TOO_LARGE)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Not a JPEG, PNG or static WebP by its content, above the pixel limit, or undecodable (INVALID_IMAGE)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Object storage unavailable (STORAGE_UNAVAILABLE)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Set a custom cover",
+        "tags": [
+          "videos"
+        ]
+      },
+      "delete": {
+        "description": "Removes the custom cover, so the one generated by the worker is served again. Idempotent (a video without a custom cover also answers 204). Owner only.",
+        "operationId": "VideosController_removeThumbnail",
+        "parameters": [
+          {
+            "name": "public_id",
+            "required": true,
+            "in": "path",
+            "description": "Public identifier of the video (11 URL-safe characters)",
+            "schema": {
+              "example": "dQw4w9WgXcQ",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Custom cover removed"
+          },
+          "401": {
+            "description": "Missing or invalid access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The video belongs to another channel (VIDEO_ACCESS_DENIED)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Video not found (VIDEO_NOT_FOUND)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Object storage unavailable (STORAGE_UNAVAILABLE)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Remove the custom cover",
         "tags": [
           "videos"
         ]
@@ -1173,6 +2041,285 @@
         "required": [
           "token",
           "new_password"
+        ]
+      },
+      "UpdateChannelDto": {
+        "type": "object",
+        "properties": {
+          "nickname": {
+            "type": "string",
+            "description": "`^[a-z0-9_]{3,50}$`, not reserved; changes the public address."
+          },
+          "name": {
+            "type": "string",
+            "description": "1–50 characters after trimming, plain text.",
+            "maxLength": 50
+          },
+          "description": {
+            "type": "string",
+            "nullable": true,
+            "description": "Up to 5,000 characters, plain text; `null` clears it.",
+            "maxLength": 5000
+          }
+        }
+      },
+      "ChannelResponseDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "Meu Canal"
+          },
+          "nickname": {
+            "type": "string",
+            "example": "meu_canal"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true,
+            "example": "Sobre o canal"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "name",
+          "nickname",
+          "description",
+          "created_at"
+        ]
+      },
+      "CategoryResponseDto": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "example": "musica"
+          },
+          "name": {
+            "type": "string",
+            "example": "Música"
+          }
+        },
+        "required": [
+          "slug",
+          "name"
+        ]
+      },
+      "PanelVideoItemDto": {
+        "type": "object",
+        "properties": {
+          "public_id": {
+            "type": "string",
+            "example": "dQw4w9WgXcQ"
+          },
+          "title": {
+            "type": "string",
+            "example": "Holiday in Lisbon"
+          },
+          "thumbnail_url": {
+            "type": "string",
+            "example": "/videos/dQw4w9WgXcQ/thumbnail"
+          },
+          "category": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CategoryResponseDto"
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "draft",
+              "processing",
+              "ready",
+              "error"
+            ],
+            "type": "string"
+          },
+          "visibility": {
+            "enum": [
+              "public",
+              "unlisted"
+            ],
+            "type": "string"
+          },
+          "published_at": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "views": {
+            "type": "number",
+            "example": 0,
+            "description": "Always 0 until Phase 05"
+          },
+          "likes": {
+            "type": "number",
+            "example": 0,
+            "description": "Always 0 until Phase 06"
+          },
+          "comments": {
+            "type": "number",
+            "example": 0,
+            "description": "Always 0 until Phase 06"
+          }
+        },
+        "required": [
+          "public_id",
+          "title",
+          "thumbnail_url",
+          "category",
+          "status",
+          "visibility",
+          "published_at",
+          "created_at",
+          "views",
+          "likes",
+          "comments"
+        ]
+      },
+      "PaginatedPanelVideosDto": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "number",
+            "example": 1
+          },
+          "limit": {
+            "type": "number",
+            "example": 20
+          },
+          "total": {
+            "type": "number",
+            "example": 45
+          },
+          "total_pages": {
+            "type": "number",
+            "example": 3
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PanelVideoItemDto"
+            }
+          }
+        },
+        "required": [
+          "page",
+          "limit",
+          "total",
+          "total_pages",
+          "items"
+        ]
+      },
+      "PublicChannelResponseDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "Meu Canal"
+          },
+          "nickname": {
+            "type": "string",
+            "example": "meu_canal"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true,
+            "example": "Sobre o canal"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "video_count": {
+            "type": "number",
+            "example": 12,
+            "description": "Published public videos only"
+          }
+        },
+        "required": [
+          "name",
+          "nickname",
+          "description",
+          "created_at",
+          "video_count"
+        ]
+      },
+      "PublicVideoItemDto": {
+        "type": "object",
+        "properties": {
+          "public_id": {
+            "type": "string",
+            "example": "dQw4w9WgXcQ"
+          },
+          "title": {
+            "type": "string",
+            "example": "Holiday in Lisbon"
+          },
+          "thumbnail_url": {
+            "type": "string",
+            "example": "/videos/dQw4w9WgXcQ/thumbnail"
+          },
+          "duration_seconds": {
+            "type": "number",
+            "nullable": true,
+            "example": 12.5
+          },
+          "published_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "public_id",
+          "title",
+          "thumbnail_url",
+          "duration_seconds",
+          "published_at"
+        ]
+      },
+      "PaginatedPublicVideosDto": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "number",
+            "example": 1
+          },
+          "limit": {
+            "type": "number",
+            "example": 20
+          },
+          "total": {
+            "type": "number",
+            "example": 45
+          },
+          "total_pages": {
+            "type": "number",
+            "example": 3
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublicVideoItemDto"
+            }
+          }
+        },
+        "required": [
+          "page",
+          "limit",
+          "total",
+          "total_pages",
+          "items"
         ]
       },
       "CreateVideoDto": {
@@ -1352,6 +2499,20 @@
             "type": "string",
             "example": "Holiday in Lisbon"
           },
+          "description": {
+            "type": "string",
+            "nullable": true,
+            "example": "Plain text"
+          },
+          "category": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CategoryResponseDto"
+              }
+            ]
+          },
           "status": {
             "enum": [
               "draft",
@@ -1361,6 +2522,24 @@
             ],
             "type": "string",
             "example": "ready"
+          },
+          "visibility": {
+            "enum": [
+              "public",
+              "unlisted"
+            ],
+            "type": "string",
+            "example": "public"
+          },
+          "published_at": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "description": "Null while the video is an editorial draft"
+          },
+          "thumbnail_url": {
+            "type": "string",
+            "example": "/videos/dQw4w9WgXcQ/thumbnail"
           },
           "duration_seconds": {
             "type": "number",
@@ -1380,17 +2559,69 @@
           "created_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
           }
         },
         "required": [
           "public_id",
           "title",
+          "description",
+          "category",
           "status",
+          "visibility",
+          "published_at",
+          "thumbnail_url",
           "duration_seconds",
           "width",
           "height",
-          "created_at"
+          "created_at",
+          "updated_at"
         ]
+      },
+      "UpdateVideoDto": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "1–100 characters after trimming, plain text.",
+            "maxLength": 100
+          },
+          "description": {
+            "type": "string",
+            "nullable": true,
+            "description": "Up to 5,000 characters, plain text; `null` clears it.",
+            "maxLength": 5000
+          },
+          "category": {
+            "type": "string",
+            "nullable": true,
+            "description": "Category slug (see GET /categories); `null` clears it."
+          },
+          "visibility": {
+            "type": "string",
+            "description": "Changing it does not change `published_at`.",
+            "enum": [
+              "public",
+              "unlisted"
+            ]
+          }
+        }
+      },
+      "PublishVideoDto": {
+        "type": "object",
+        "properties": {
+          "visibility": {
+            "type": "string",
+            "description": "Defaults to `public`.",
+            "enum": [
+              "public",
+              "unlisted"
+            ]
+          }
+        }
       },
       "ApiErrorEnvelope": {
         "type": "object",

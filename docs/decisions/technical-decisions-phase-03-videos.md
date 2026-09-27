@@ -233,6 +233,9 @@ _Subprojects in scope:_
 
 **Note:** The root CLAUDE.md ("Frontend … streams from Object Storage", "API … uploads to storage") and `docs/diagrams/software-arch.mermaid` (`Frontend → Storage: Streams`, `API → Storage: Uploads`, `Message Queue: TBD`) describe the target architecture, which the enunciado leaves to this research (lines on streaming/upload decisions) and requires to match the code at the end (documentation inconsistent with the code is an automatic-fail item). At closing (PRD 06) they are updated to the implemented flow: the client uploads parts directly to storage (TD-02), the API streams and serves downloads (this TD), and the queue is BullMQ on Redis (TD-01). Streaming endpoints are modelled as REST resources of the video (the exact paths are fixed in the plan).
 
+**Revisions:**
+- 2026-09-27 — Phase 04 (`phase-04-gerenciamento/TD-02`) turns the reads (metadata, `stream`, `download`, thumbnail) into `@OptionalAuth()` routes: a draft requested by anyone but the owner (anonymous included) → `404 VIDEO_NOT_FOUND`, then a non-`ready` video → `409 VIDEO_NOT_READY` (owner only); responses carry `Cache-Control: private, no-cache`. Rationale: Acesso estendido pela Fase 04 (extensão antecipada pelo próprio TD, que deixou o bloqueio de não publicados para ela).
+
 ---
 
 ## TD-08: Video Status Lifecycle, Failure Handling and Idempotency

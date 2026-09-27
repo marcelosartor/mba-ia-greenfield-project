@@ -1,21 +1,17 @@
 import { Injectable } from '@nestjs/common';
 import type { Readable } from 'node:stream';
-import {
-  InvalidRangeException,
-  VideoNotFoundException,
-  VideoNotReadyException,
-} from '../common/exceptions/domain.exception';
+import { InvalidRangeException } from '../common/exceptions/domain.exception';
 import { StorageService } from '../storage/storage.service';
-import type { Video } from './entities/video.entity';
 import {
   buildContentDisposition,
   buildDownloadFilename,
 } from './filename.util';
 import { parseRange } from './range.util';
-import { VideoStatus } from './video-status.enum';
-import { VideosRepository } from './videos.repository';
+import { VideoAccessService } from './video-access.service';
 
 const DEFAULT_CONTENT_TYPE = 'application/octet-stream';
+/** Reads depend on who asks (draft vs published): never a shared cache. */
+export const PRIVATE_NO_CACHE = 'private, no-cache';
 
 export interface VideoStream {
   statusCode: 200 | 206;
@@ -31,8 +27,8 @@ export interface VideoDownload {
 @Injectable()
 export class VideoStreamingService {
   constructor(
-    private readonly videosRepository: VideosRepository,
     private readonly storageService: StorageService,
+    private readonly videoAccessService: VideoAccessService,
   ) {}
 
   /**
@@ -43,8 +39,12 @@ export class VideoStreamingService {
   async stream(
     publicId: string,
     rangeHeader: string | undefined,
+    viewerUserId?: string,
   ): Promise<VideoStream> {
-    const video = await this.loadReadyVideo(publicId);
+    const video = await this.videoAccessService.loadReadable(
+      publicId,
+      viewerUserId,
+    );
 
     const bucket = this.storageService.videosBucket;
     const head = await this.storageService.headObject(bucket, video.video_key);
@@ -66,7 +66,7 @@ export class VideoStreamingService {
       'Content-Type':
         object.contentType ?? head.contentType ?? DEFAULT_CONTENT_TYPE,
       'Accept-Ranges': 'bytes',
-      'Cache-Control': 'no-cache',
+      'Cache-Control': PRIVATE_NO_CACHE,
     };
     const etag = object.etag ?? head.etag;
     if (etag) {
@@ -84,8 +84,14 @@ export class VideoStreamingService {
   }
 
   /** The whole file as an attachment, streamed from the object storage. */
-  async download(publicId: string): Promise<VideoDownload> {
-    const video = await this.loadReadyVideo(publicId);
+  async download(
+    publicId: string,
+    viewerUserId?: string,
+  ): Promise<VideoDownload> {
+    const video = await this.videoAccessService.loadReadable(
+      publicId,
+      viewerUserId,
+    );
 
     const object = await this.storageService.getObjectRange(
       this.storageService.videosBucket,
@@ -98,22 +104,11 @@ export class VideoStreamingService {
       'Content-Disposition': buildContentDisposition(
         buildDownloadFilename(video.title, video.video_key),
       ),
-      'Cache-Control': 'no-cache',
+      'Cache-Control': PRIVATE_NO_CACHE,
     };
     if (object.etag) {
       headers.ETag = object.etag;
     }
     return { headers, body: object.body };
-  }
-
-  private async loadReadyVideo(publicId: string): Promise<Video> {
-    const video = await this.videosRepository.findByPublicId(publicId);
-    if (!video) {
-      throw new VideoNotFoundException();
-    }
-    if (video.status !== VideoStatus.READY) {
-      throw new VideoNotReadyException();
-    }
-    return video;
   }
 }

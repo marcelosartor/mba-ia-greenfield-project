@@ -152,7 +152,7 @@ MAIL_FROM=StreamTube <noreply@streamtube.local>
 MAIL_FROM="StreamTube <noreply@streamtube.local>"
 ```
 
-New variables for storage (`STORAGE_*`), Redis (`REDIS_*`, `QUEUE_PREFIX`) and video processing (`VIDEO_*`) are documented in `.env.example`; the storage credentials are required and are also the MinIO root credentials in `compose.yaml`.
+New variables for storage (`STORAGE_*`), Redis (`REDIS_*`, `QUEUE_PREFIX`), video processing and custom covers (`VIDEO_*`) and rate limiting (`THROTTLE_PUBLIC_READ_LIMIT`) are documented in `.env.example`; the storage credentials are required and are also the MinIO root credentials in `compose.yaml`.
 
 Whenever possible, prefer storing only the bare address in `.env` and composing display names in code (e.g., in `mail.config.ts`) so the file stays shell-safe.
 
@@ -175,17 +175,38 @@ NestJS with standard module structure. Source lives in `src/`, compiled output i
 - `src/queue/` — `QueueModule`: the BullMQ queues `video-processing`, `video-processing-dlq` and `video-maintenance` (names in `queue.constants.ts`) and `VideoProcessingPublisher` (`publish` and `republish`; the job id is the video id) `video-maintenance` keeps a day of finished jobs (`MAINTENANCE_JOB_OPTIONS`): the sweeper runs ~96 times a day and Redis runs with `noeviction`, so a queue without retention would fill it. Any new recurring job needs retention too.
 - `src/worker/` — `VideoProcessor` (consumes `video-processing`), `UploadsSweeperService`/`UploadsSweeperProcessor`/`UploadsSweeperScheduler` (every 15 minutes: aborts drafts abandoned for over 24 h and republishes the job of uploads completed for over 5 minutes that never left `draft`), and `media/` (`MediaProbeService`, `ThumbnailService`, both reading the source by presigned URL through ffprobe/ffmpeg)
 
-Endpoints (`VideosController`, `:public_id` is the 11-character public identifier):
+### Management modules (Phase 04)
 
-| Endpoint | Access | Purpose |
-|---|---|---|
-| `POST /videos` | authenticated | creates the draft and opens the multipart upload |
-| `GET /videos/{public_id}/upload` | owner | parts already stored (resume) |
-| `POST /videos/{public_id}/upload/parts` | owner | presigned URLs for up to 100 parts |
-| `POST /videos/{public_id}/upload/completion` | owner | validates and completes the upload, publishes the job (idempotent) |
-| `GET /videos/{public_id}` | public (`ready` only) | metadata |
-| `GET /videos/{public_id}/stream` | public (`ready` only) | streaming with `Range`/206 |
-| `GET /videos/{public_id}/download` | public (`ready` only) | file as an attachment |
+- `src/categories/` — `CategoriesModule`: the `Category` entity (reference data inserted by the `SeedCategories` data migration), `CategoriesService` (`findAll` ordered by name with `outros` last, `findBySlug`) and `GET /categories`
+- `src/throttling/` — `ThrottlingModule` with the four named throttlers and the route-class decorators `PublicReadThrottle()`, `AuthenticatedThrottle()` and `UploadsThrottle()` (`throttle-class.decorator.ts`); the guards stay registered in `AuthModule`, `JwtAuthGuard` first
+- `src/videos/` gains `VideoAccessService` (read rule by publication), `VideoOwnershipService` (write access, shared with the upload), `VideoPublicationService`, `thumbnails/` (`ImageNormalizerService`, `VideoThumbnailsService`, `ImageTooLargeFilter`) and `listing/` (`VideoListingsModule`/`VideoListingsService`, the panel and public listings; it imports only `VideosRepositoryModule`, so `ChannelsModule` can use it without a cycle)
+- `src/channels/` gains `ChannelsController` (the four `/channels` routes; `/channels/me…` is declared before `/channels/:nickname…`), the nickname rules in `nickname.util.ts` (`NICKNAME_PATTERN`, `RESERVED_NICKNAMES`) and `updateOwn`/`findByNickname`; `ChannelsService` never queries `Video`
+- `src/auth/decorators/` gains `OptionalAuth()` and `OptionalCurrentUser()`; `src/common/openapi/` gains `ApiOptionalBearerAuth()`; `src/common/text/plain-text.util.ts` and `src/common/pagination/` are shared by the edit and listing DTOs
+
+Endpoints (`:public_id` is the 11-character public identifier; "draft" means `published_at` is null):
+
+| Endpoint | Access | Throttler | Purpose |
+|---|---|---|---|
+| `POST /videos` | authenticated | `uploads` | creates the draft and opens the multipart upload |
+| `GET /videos/{public_id}/upload` | owner | `uploads` | parts already stored (resume) |
+| `POST /videos/{public_id}/upload/parts` | owner | `uploads` | presigned URLs for up to 100 parts |
+| `POST /videos/{public_id}/upload/completion` | owner | `uploads` | validates and completes the upload, publishes the job (idempotent) |
+| `GET /videos/{public_id}` | optional auth: published for anyone, draft for the owner | none | metadata |
+| `GET /videos/{public_id}/stream` | optional auth, as above | none | streaming with `Range`/206 |
+| `GET /videos/{public_id}/download` | optional auth, as above | none | file as an attachment |
+| `GET /videos/{public_id}/thumbnail` | optional auth, as above | `public-read` | custom cover if any, else the generated one |
+| `PATCH /videos/{public_id}` | owner | `authenticated` | edit title, description, category, visibility |
+| `POST /videos/{public_id}/publication` | owner | `authenticated` | publish a `ready` video (`public` by default) |
+| `DELETE /videos/{public_id}/publication` | owner | `authenticated` | back to draft (idempotent) |
+| `PUT /videos/{public_id}/thumbnail` | owner | `uploads` | custom cover (multipart `file`, up to 2 MiB) |
+| `DELETE /videos/{public_id}/thumbnail` | owner | `uploads` | remove the custom cover (idempotent) |
+| `GET /categories` | public | `public-read` | platform categories |
+| `PATCH /channels/me` | authenticated | `authenticated` | edit nickname, name, description |
+| `GET /channels/me/videos` | authenticated | `authenticated` | owner panel, every status, paginated |
+| `GET /channels/{nickname}` | public | `public-read` | public channel page with `video_count` |
+| `GET /channels/{nickname}/videos` | public | `public-read` | published public videos, paginated |
+
+A published `unlisted` video is readable by link but never listed; `GET /channels/{nickname}/videos` and `video_count` use the single listable predicate (`whereListable` in `VideosRepository`).
 
 Video status and what it means: `draft` (rascunho — the upload is in progress or, with `upload_completed_at` set, waiting for the worker), `processing` (processando), `ready` (pronto), `error` (erro, with `error_code` `INVALID_MEDIA` or `PROCESSING_FAILED`). Transitions are conditional `UPDATE`s (`VideosRepository.transitionStatus`, `startProcessing`, `markUploadCompleted`).
 
@@ -194,7 +215,8 @@ Things to keep in mind when changing these modules:
 - The worker throws transient errors so BullMQ retries them; only `InvalidMediaError` becomes a failure that skips the remaining attempts (`InvalidMediaJobFailure`, a subclass of `UnrecoverableError`, raised after the video was already set to `error`). BullMQ raises a plain `UnrecoverableError` by itself when a job stalls twice (worker killed in the middle of a file); the `failed` handler treats that one as an exhausted job (`PROCESSING_FAILED` + DLQ), and `bullmq-stalled-job.integration-spec.ts` pins that behaviour. The sweeper also re-queues videos left in `processing` with no run touching them for longer than twice the processing timeout plus 5 minutes. The "log and do not rethrow" rule for services applies only to the worker's event handler and the sweeper, never to `VideoProcessor.process`.
 - Stream and download return a `StreamableFile` and destroy the storage stream when the client closes the connection (`pipeStorageBody` in the controller); never buffer the file.
 - Errors that carry response headers (e.g. `Content-Range` on `INVALID_RANGE`) declare them on `DomainException.headers`, and the filter applies them.
-- The ThrottlerGuard from Phase 02 is global (10 requests per minute per IP) and applies to every route except `GET /` and the three public video reads (`GET /videos/{public_id}`, `/stream`, `/download`), which carry `@SkipThrottle()`: a player sends one Range request per seek and would get `429` within seconds. New public routes that a client calls repeatedly need the same opt-out; `test/videos-public-throttle.e2e-spec.ts` covers it.
+- Rate limiting uses four named throttlers (`src/throttling/`, see the table above and `.claude/rules/auth-jwt.md`): every new route picks its class with `PublicReadThrottle()`, `AuthenticatedThrottle()` or `UploadsThrottle()`; a route without a class falls into `default` (10 requests per minute per IP). `GET /` and the three video reads carry `@SkipThrottle()` and no class, which skips every throttler: a player sends one Range request per seek. `test/throttling.e2e-spec.ts` and `test/videos-public-throttle.e2e-spec.ts` cover it.
+- Custom covers are untrusted too. `ImageNormalizerService` (`src/videos/thumbnails/`) identifies JPEG/PNG/WebP by their first bytes, refuses above `VIDEO_THUMBNAIL_MAX_PIXELS` or an animated WebP before decoding, and runs ffmpeg on stdin/stdout with the demuxer forced by the content, `-protocol_whitelist pipe`, `-max_alloc` and a `VIDEO_THUMBNAIL_TIMEOUT_MS` timeout: the image equivalent of `SAFE_INPUT_OPTIONS`. Multer cuts an upload over 2 MiB while it streams in (`IMAGE_TOO_LARGE`).
 - Uploaded files are untrusted content. Every ffmpeg/ffprobe call on one must carry `SAFE_INPUT_OPTIONS` (`src/worker/media/media-tool.ts`): a demuxer whitelist (mp4, mov, mkv, webm) and an HTTP(S)-only protocol whitelist. Without it a playlist uploaded as `a.mp4` makes the worker fetch every URL it lists (SSRF); `media-probe`/`thumbnail` integration specs assert that an internal server receives no request. If the upload allowlist gains a container, add its demuxer to `ALLOWED_INPUT_FORMATS`.
 - `scripts/upload-large-video.mjs` is the manual 10 GiB upload proof (steps in `docs/phases/phase-03-videos/progress.md`, SI-03.18); run it in a container other than `nestjs-api`.
 - The e2e specs come from `specs/*.plan.md` (one per endpoint); helpers live in `test/helpers/` and `src/test/`.

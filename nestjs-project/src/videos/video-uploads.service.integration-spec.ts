@@ -1,4 +1,5 @@
 import { getQueueToken } from '@nestjs/bullmq';
+import { Category } from '../categories/entities/category.entity';
 import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -39,7 +40,14 @@ import { VideosModule } from './videos.module';
 
 const PART_SIZE = 5_242_880;
 
-const ALL_ENTITIES = [User, Channel, RefreshToken, VerificationToken, Video];
+const ALL_ENTITIES = [
+  User,
+  Channel,
+  RefreshToken,
+  VerificationToken,
+  Video,
+  Category,
+];
 
 describe('VideoUploadsService (integration)', () => {
   let dataSource: DataSource;

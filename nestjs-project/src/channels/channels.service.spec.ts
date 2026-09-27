@@ -1,4 +1,10 @@
+import { BadRequestException } from '@nestjs/common';
 import { DataSource, EntityManager, QueryFailedError } from 'typeorm';
+import {
+  ChannelNotFoundException,
+  NicknameAlreadyExistsException,
+  NicknameReservedException,
+} from '../common/exceptions/domain.exception';
 import { ChannelsService } from './channels.service';
 import { Channel } from './entities/channel.entity';
 
@@ -138,6 +144,65 @@ describe('ChannelsService', () => {
         service.createChannel('user-id', 'carol@example.com'),
       ).rejects.toThrow('Connection lost');
       expect(manager.save).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('updateOwn', () => {
+    let repository: {
+      findOneBy: jest.Mock;
+      update: jest.Mock;
+      findOneByOrFail: jest.Mock;
+    };
+    let service: ChannelsService;
+
+    beforeEach(() => {
+      repository = {
+        findOneBy: jest.fn().mockResolvedValue(makeChannel('before')),
+        update: jest.fn().mockResolvedValue({ affected: 1 }),
+        findOneByOrFail: jest.fn().mockResolvedValue(makeChannel('after')),
+      };
+      service = new ChannelsService({
+        getRepository: () => repository,
+      } as unknown as DataSource);
+    });
+
+    it('rejects an empty body', async () => {
+      await expect(service.updateOwn('user-id', {})).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(repository.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects a reserved nickname before touching the database', async () => {
+      await expect(
+        service.updateOwn('user-id', { nickname: 'admin' }),
+      ).rejects.toBeInstanceOf(NicknameReservedException);
+      expect(repository.findOneBy).not.toHaveBeenCalled();
+    });
+
+    it('answers channel not found for a user without a channel', async () => {
+      repository.findOneBy.mockResolvedValue(null);
+
+      await expect(
+        service.updateOwn('user-id', { name: 'X' }),
+      ).rejects.toBeInstanceOf(ChannelNotFoundException);
+    });
+
+    it('turns the UNIQUE violation on nickname into NICKNAME_ALREADY_EXISTS', async () => {
+      repository.update.mockRejectedValue(makeUniqueError());
+
+      await expect(
+        service.updateOwn('user-id', { nickname: 'taken_nick' }),
+      ).rejects.toBeInstanceOf(NicknameAlreadyExistsException);
+    });
+
+    it('writes only the fields that came in the body', async () => {
+      await service.updateOwn('user-id', { description: null });
+
+      expect(repository.update).toHaveBeenCalledWith(
+        { id: 'uuid' },
+        { description: null },
+      );
     });
   });
 });

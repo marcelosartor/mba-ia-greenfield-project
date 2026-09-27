@@ -1,23 +1,12 @@
 import { ConfigModule, type ConfigType } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import redisConfig from './redis.config';
-import videoConfig from './video.config';
 
-const KEYS = [
-  'REDIS_HOST',
-  'REDIS_PORT',
-  'QUEUE_PREFIX',
-  'VIDEO_UPLOAD_PART_SIZE_BYTES',
-  'VIDEO_WORKER_CONCURRENCY',
-  'VIDEO_PROCESSING_TIMEOUT_MS',
-] as const;
+const KEYS = ['REDIS_HOST', 'REDIS_PORT', 'QUEUE_PREFIX'] as const;
 
 const loadConfigs = async (
   env: Partial<Record<(typeof KEYS)[number], string>>,
-): Promise<{
-  redis: ConfigType<typeof redisConfig>;
-  video: ConfigType<typeof videoConfig>;
-}> => {
+): Promise<{ redis: ConfigType<typeof redisConfig> }> => {
   for (const key of KEYS) delete process.env[key];
   Object.assign(process.env, env);
 
@@ -25,15 +14,14 @@ const loadConfigs = async (
     imports: [
       ConfigModule.forRoot({
         ignoreEnvFile: true,
-        load: [redisConfig, videoConfig],
+        load: [redisConfig],
       }),
     ],
   }).compile();
 
   const redis = module.get<ConfigType<typeof redisConfig>>(redisConfig.KEY);
-  const video = module.get<ConfigType<typeof videoConfig>>(videoConfig.KEY);
   await module.close();
-  return { redis, video };
+  return { redis };
 };
 
 describe('redisConfig', () => {
@@ -59,35 +47,5 @@ describe('redisConfig', () => {
     const { redis } = await loadConfigs({});
 
     expect(redis).toEqual({ host: 'redis', port: 6379, queuePrefix: 'bull' });
-  });
-});
-
-describe('videoConfig', () => {
-  afterEach(() => {
-    for (const key of KEYS) delete process.env[key];
-  });
-
-  it('should read the video settings from the environment', async () => {
-    const { video } = await loadConfigs({
-      VIDEO_UPLOAD_PART_SIZE_BYTES: '5242880',
-      VIDEO_WORKER_CONCURRENCY: '3',
-      VIDEO_PROCESSING_TIMEOUT_MS: '60000',
-    });
-
-    expect(video).toEqual({
-      partSizeBytes: 5242880,
-      workerConcurrency: 3,
-      processingTimeoutMs: 60000,
-    });
-  });
-
-  it('should default to a 64 MiB part size, one worker and a 30 min timeout', async () => {
-    const { video } = await loadConfigs({});
-
-    expect(video).toEqual({
-      partSizeBytes: 67108864,
-      workerConcurrency: 1,
-      processingTimeoutMs: 1800000,
-    });
   });
 });

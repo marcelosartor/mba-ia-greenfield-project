@@ -7,8 +7,6 @@ import {
   UploadAlreadyCompletedException,
   InvalidPartNumberException,
   UploadIncompleteException,
-  VideoAccessDeniedException,
-  VideoNotFoundException,
   VideoTooLargeException,
 } from '../common/exceptions/domain.exception';
 import videoConfig from '../config/video.config';
@@ -28,6 +26,7 @@ import {
   VIDEO_FORMATS,
 } from './video-upload.constants';
 import { expectedPartLength, partCountFor } from './upload-parts.util';
+import { VideoOwnershipService } from './video-ownership.service';
 import { VideosRepository } from './videos.repository';
 import type { InitiatedUpload } from './videos.types';
 
@@ -54,6 +53,7 @@ export class VideoUploadsService {
     private readonly videosRepository: VideosRepository,
     private readonly storageService: StorageService,
     private readonly videoProcessingPublisher: VideoProcessingPublisher,
+    private readonly videoOwnershipService: VideoOwnershipService,
     @Inject(videoConfig.KEY)
     private readonly config: ConfigType<typeof videoConfig>,
   ) {}
@@ -103,7 +103,7 @@ export class VideoUploadsService {
     userId: string,
     publicId: string,
   ): Promise<UploadSessionResponseDto> {
-    const video = await this.loadOwnedVideo(userId, publicId);
+    const video = await this.videoOwnershipService.loadOwned(userId, publicId);
 
     const uploadCompleted = video.upload_completed_at !== null;
     const parts =
@@ -128,7 +128,7 @@ export class VideoUploadsService {
     publicId: string,
     dto: RequestUploadPartsDto,
   ): Promise<UploadPartsResponseDto> {
-    const video = await this.loadOwnedVideo(userId, publicId);
+    const video = await this.videoOwnershipService.loadOwned(userId, publicId);
     if (video.upload_completed_at !== null) {
       throw new UploadAlreadyCompletedException();
     }
@@ -176,7 +176,7 @@ export class VideoUploadsService {
     userId: string,
     publicId: string,
   ): Promise<UploadCompletionResponseDto> {
-    const video = await this.loadOwnedVideo(userId, publicId);
+    const video = await this.videoOwnershipService.loadOwned(userId, publicId);
     if (video.upload_completed_at !== null) {
       return this.toCompletionResponse(video);
     }
@@ -214,14 +214,6 @@ export class VideoUploadsService {
     }
 
     return this.toCompletionResponse(video);
-  }
-
-  /** Owner = the user whose channel owns the video (channels.user_id = sub). */
-  async assertOwner(userId: string, video: Video): Promise<void> {
-    const channel = await this.channelsService.findByUserId(userId);
-    if (!channel || channel.id !== video.channel_id) {
-      throw new VideoAccessDeniedException();
-    }
   }
 
   /**
@@ -291,18 +283,6 @@ export class VideoUploadsService {
       status: video.status,
       upload_completed: true,
     };
-  }
-
-  private async loadOwnedVideo(
-    userId: string,
-    publicId: string,
-  ): Promise<Video> {
-    const video = await this.videosRepository.findByPublicId(publicId);
-    if (!video) {
-      throw new VideoNotFoundException();
-    }
-    await this.assertOwner(userId, video);
-    return video;
   }
 
   private resolveExtension(dto: CreateVideoDto): string {

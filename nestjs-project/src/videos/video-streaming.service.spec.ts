@@ -8,6 +8,7 @@ import {
 import type { StorageService } from '../storage/storage.service';
 import type { Video } from './entities/video.entity';
 import { VideoStatus } from './video-status.enum';
+import { VideoAccessService } from './video-access.service';
 import { VideoStreamingService } from './video-streaming.service';
 import type { VideosRepository } from './videos.repository';
 
@@ -18,10 +19,12 @@ const readyVideo = {
   public_id: 'abcdefghijk',
   status: VideoStatus.READY,
   video_key: 'channel-1/video-1/source.mp4',
+  published_at: new Date('2026-09-27T12:00:00Z'),
+  channel: { user_id: 'owner-user' },
 } as Video;
 
 describe('VideoStreamingService', () => {
-  let repository: { findByPublicId: jest.Mock };
+  let repository: { findByPublicIdWithRelations: jest.Mock };
   let storage: {
     videosBucket: string;
     headObject: jest.Mock;
@@ -32,7 +35,9 @@ describe('VideoStreamingService', () => {
 
   beforeEach(() => {
     body = Readable.from([Buffer.from('bytes')]);
-    repository = { findByPublicId: jest.fn().mockResolvedValue(readyVideo) };
+    repository = {
+      findByPublicIdWithRelations: jest.fn().mockResolvedValue(readyVideo),
+    };
     storage = {
       videosBucket: 'videos',
       headObject: jest.fn().mockResolvedValue({
@@ -47,15 +52,16 @@ describe('VideoStreamingService', () => {
         etag: '"etag"',
       }),
     };
+    // The real access rules over a mocked repository.
     service = new VideoStreamingService(
-      repository as unknown as VideosRepository,
       storage as unknown as StorageService,
+      new VideoAccessService(repository as unknown as VideosRepository),
     );
   });
 
   describe('videos that cannot be served', () => {
     it('should throw VideoNotFoundException for an unknown public_id', async () => {
-      repository.findByPublicId.mockResolvedValue(null);
+      repository.findByPublicIdWithRelations.mockResolvedValue(null);
 
       await expect(
         service.stream('aaaaaaaaaaa', undefined),
@@ -66,7 +72,10 @@ describe('VideoStreamingService', () => {
     it.each([VideoStatus.DRAFT, VideoStatus.PROCESSING, VideoStatus.ERROR])(
       'should throw VideoNotReadyException for a video in %s',
       async (status) => {
-        repository.findByPublicId.mockResolvedValue({ ...readyVideo, status });
+        repository.findByPublicIdWithRelations.mockResolvedValue({
+          ...readyVideo,
+          status,
+        });
 
         await expect(
           service.stream('abcdefghijk', undefined),
@@ -92,7 +101,7 @@ describe('VideoStreamingService', () => {
         'Content-Type': 'video/mp4',
         'Content-Length': String(TOTAL),
         'Accept-Ranges': 'bytes',
-        'Cache-Control': 'no-cache',
+        'Cache-Control': 'private, no-cache',
         ETag: '"etag"',
       });
     });
@@ -170,7 +179,7 @@ describe('VideoStreamingService', () => {
 
   describe('download', () => {
     beforeEach(() => {
-      repository.findByPublicId.mockResolvedValue({
+      repository.findByPublicIdWithRelations.mockResolvedValue({
         ...readyVideo,
         title: 'Meu vídeo: teste/1',
       });
@@ -188,13 +197,13 @@ describe('VideoStreamingService', () => {
         'Content-Type': 'video/mp4',
         'Content-Length': String(TOTAL),
         'Content-Disposition': `attachment; filename="Meu video teste 1.mp4"; filename*=UTF-8''Meu%20v%C3%ADdeo%20teste%201.mp4`,
-        'Cache-Control': 'no-cache',
+        'Cache-Control': 'private, no-cache',
         ETag: '"etag"',
       });
     });
 
     it('should throw VideoNotFoundException for an unknown public_id', async () => {
-      repository.findByPublicId.mockResolvedValue(null);
+      repository.findByPublicIdWithRelations.mockResolvedValue(null);
 
       await expect(service.download('aaaaaaaaaaa')).rejects.toBeInstanceOf(
         VideoNotFoundException,
@@ -204,7 +213,10 @@ describe('VideoStreamingService', () => {
     it.each([VideoStatus.DRAFT, VideoStatus.PROCESSING, VideoStatus.ERROR])(
       'should throw VideoNotReadyException for a video in %s',
       async (status) => {
-        repository.findByPublicId.mockResolvedValue({ ...readyVideo, status });
+        repository.findByPublicIdWithRelations.mockResolvedValue({
+          ...readyVideo,
+          status,
+        });
 
         await expect(service.download('abcdefghijk')).rejects.toBeInstanceOf(
           VideoNotReadyException,
@@ -239,5 +251,62 @@ describe('VideoStreamingService', () => {
     await expect(
       service.stream('abcdefghijk', undefined),
     ).rejects.toBeInstanceOf(StorageUnavailableException);
+  });
+
+  describe('stream access by publication (Phase 04)', () => {
+    const draft = { ...readyVideo, published_at: null } as Video;
+
+    it('should hide a draft from an anonymous caller without touching the storage', async () => {
+      repository.findByPublicIdWithRelations.mockResolvedValue(draft);
+
+      await expect(
+        service.stream('abcdefghijk', undefined, undefined),
+      ).rejects.toBeInstanceOf(VideoNotFoundException);
+      expect(storage.headObject).not.toHaveBeenCalled();
+    });
+
+    it('should stream a draft to its owner', async () => {
+      repository.findByPublicIdWithRelations.mockResolvedValue(draft);
+
+      const result = await service.stream(
+        'abcdefghijk',
+        undefined,
+        'owner-user',
+      );
+
+      expect(result.statusCode).toBe(200);
+    });
+
+    it('should send Cache-Control private, no-cache', async () => {
+      const result = await service.stream('abcdefghijk', 'bytes=0-1023');
+
+      expect(result.headers['Cache-Control']).toBe('private, no-cache');
+    });
+  });
+
+  describe('download access by publication (Phase 04)', () => {
+    const draft = {
+      ...readyVideo,
+      title: 'Holiday',
+      published_at: null,
+    } as Video;
+
+    it('should hide a draft from another user without touching the storage', async () => {
+      repository.findByPublicIdWithRelations.mockResolvedValue(draft);
+
+      await expect(
+        service.download('abcdefghijk', 'someone-else'),
+      ).rejects.toBeInstanceOf(VideoNotFoundException);
+      expect(storage.getObjectRange).not.toHaveBeenCalled();
+    });
+
+    it('should send a draft to its owner as an attachment', async () => {
+      repository.findByPublicIdWithRelations.mockResolvedValue(draft);
+
+      const result = await service.download('abcdefghijk', 'owner-user');
+
+      expect(result.headers['Content-Disposition']).toMatch(/^attachment;/);
+      expect(result.headers['Cache-Control']).toBe('private, no-cache');
+    });
   });
 });

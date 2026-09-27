@@ -179,14 +179,103 @@ POST {{baseUrl}}/videos/{{publicId}}/upload/completion
 Authorization: Bearer {{accessToken}}
 
 
-### 15. Metadados do vídeo (público) — 409 VIDEO_NOT_READY até o worker terminar
+### 15. Metadados do vídeo — publicado: qualquer um; rascunho: só o dono (404 para os demais)
+# O token é opcional: com ele, o dono lê o próprio rascunho (409 VIDEO_NOT_READY até o worker terminar)
 GET {{baseUrl}}/videos/{{publicId}}
+Authorization: Bearer {{accessToken}}
 
 
-### 16. Streaming (público) — primeiro quilobyte por Range: responde 206 com Content-Range
+### 16. Streaming — mesmas regras de acesso dos metadados; primeiro quilobyte por Range: 206
 GET {{baseUrl}}/videos/{{publicId}}/stream
 Range: bytes=0-1023
 
 
-### 17. Download (público) — arquivo completo como anexo
+### 17. Download — mesmas regras de acesso dos metadados; arquivo completo como anexo
 GET {{baseUrl}}/videos/{{publicId}}/download
+
+
+###
+# ─────────────────────────────────────────────
+# Fase 04 — Gerenciamento de vídeos e canal
+# ─────────────────────────────────────────────
+
+@nickname = {{editChannel.response.body.$.nickname}}
+
+### 18. Categorias da plataforma (público)
+GET {{baseUrl}}/categories
+
+
+### 19. Editar o vídeo (parcial; só o dono) — campo omitido não muda, null limpa
+PATCH {{baseUrl}}/videos/{{publicId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: {{contentType}}
+
+{
+  "title": "Férias em Lisboa",
+  "description": "Um passeio pela cidade.",
+  "category": "viagens",
+  "visibility": "unlisted"
+}
+
+
+### 20. Publicar o vídeo pronto (padrão public; 409 VIDEO_NOT_PUBLISHABLE se não estiver ready)
+POST {{baseUrl}}/videos/{{publicId}}/publication
+Authorization: Bearer {{accessToken}}
+Content-Type: {{contentType}}
+
+{
+  "visibility": "public"
+}
+
+
+### 21. Despublicar — volta a rascunho (idempotente)
+DELETE {{baseUrl}}/videos/{{publicId}}/publication
+Authorization: Bearer {{accessToken}}
+
+
+### 22. Capa do vídeo — a customizada se houver, senão a gerada (regras de acesso do vídeo)
+GET {{baseUrl}}/videos/{{publicId}}/thumbnail
+
+
+### 23. Enviar capa customizada (JPEG, PNG ou WebP estático, até 2 MiB; vira JPEG de 640 px)
+PUT {{baseUrl}}/videos/{{publicId}}/thumbnail
+Authorization: Bearer {{accessToken}}
+Content-Type: multipart/form-data; boundary=capa
+
+--capa
+Content-Disposition: form-data; name="file"; filename="capa.png"
+Content-Type: image/png
+
+< ./capa.png
+--capa--
+
+
+### 24. Remover a capa customizada — volta para a gerada (idempotente)
+DELETE {{baseUrl}}/videos/{{publicId}}/thumbnail
+Authorization: Bearer {{accessToken}}
+
+
+### 25. Editar meu canal — trocar o nickname muda o endereço público
+# @name editChannel
+PATCH {{baseUrl}}/channels/me
+Authorization: Bearer {{accessToken}}
+Content-Type: {{contentType}}
+
+{
+  "nickname": "meu_canal",
+  "name": "Meu Canal",
+  "description": "Vídeos de viagem."
+}
+
+
+### 26. Painel: todos os meus vídeos, qualquer status (views, likes e comments em 0 até as Fases 05 e 06)
+GET {{baseUrl}}/channels/me/videos?page=1&limit=20
+Authorization: Bearer {{accessToken}}
+
+
+### 27. Página pública do canal (público)
+GET {{baseUrl}}/channels/{{nickname}}
+
+
+### 28. Vídeos públicos do canal (publicados e public; unlisted e rascunhos ficam de fora)
+GET {{baseUrl}}/channels/{{nickname}}/videos?page=1&limit=20

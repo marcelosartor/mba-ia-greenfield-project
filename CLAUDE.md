@@ -10,7 +10,7 @@ More info in the project overview: [docs/project-plan.md](docs/project-plan.md)
 
 This is a monorepo with two main areas:
 
-- `nestjs-project/` — Backend (NestJS 11, TypeScript, Express). One package with two processes: the API (`src/main.ts`) and the video worker (`src/worker.ts`). Contains modules for users, channels, videos, storage and queue; comments and the other social modules come in later phases.
+- `nestjs-project/` — Backend (NestJS 11, TypeScript, Express). One package with two processes: the API (`src/main.ts`) and the video worker (`src/worker.ts`). Contains modules for users, channels, categories, videos, storage, queue and throttling; comments and the other social modules come in later phases.
 - `docs/` — Project documentation, architecture diagrams, and planning.
 - `next-frontend/` (Next.js) — not yet initialized
 
@@ -32,11 +32,21 @@ Implemented in Phase 03 (`docs/phases/phase-03-videos/`); the decisions are in `
 
 - **Upload (resumable multipart, up to 10 GiB):** `POST /videos` creates a `draft` in the authenticated user's channel and opens an S3 multipart upload; the client asks for presigned part URLs (`POST /videos/{public_id}/upload/parts`), sends each part with `PUT` **directly to the storage**, and confirms with `POST /videos/{public_id}/upload/completion`, which validates the parts, completes the multipart and publishes the job. `GET /videos/{public_id}/upload` lists the parts already stored, so an interrupted upload can resume. The API never receives the video bytes on upload.
 - **Processing:** the worker moves the video `draft` → `processing` → `ready` (or `error`), fills duration, size, codecs and metadata, and saves the thumbnail at `thumbnails/{video id}/default.jpg`. Transient failures are retried 3 times with exponential backoff, an invalid file goes straight to `error` (`INVALID_MEDIA`), and exhausted jobs go to the dead-letter queue (`PROCESSING_FAILED`). Every status change is a compare-and-set `UPDATE`.
-- **Reading:** `GET /videos/{public_id}` (metadata), `/stream` (Range/206) and `/download` are public and serve only `ready` videos; stream and download pass through the API as streams, never loaded into memory.
+- **Reading:** `GET /videos/{public_id}` (metadata), `/stream` (Range/206) and `/download` pass through the API as streams, never loaded into memory. Since Phase 04 they follow the publication rule below (a draft only for its owner).
 - **Identifiers:** videos are addressed by `public_id` (11 URL-safe characters), never by the internal UUID. Storage keys use the UUID.
 - **Presigned URLs use the Compose host** (`http://minio:9000`), so parts can only be sent from inside the Docker network in this phase; a browser client will need `STORAGE_PUBLIC_ENDPOINT` and CORS on the storage (frontend phase).
 - **Queue and MinIO are real services** in `nestjs-project/compose.yaml`. The MinIO image is pinned to the last community release published on `quay.io` (never `latest`) and is for development and tests only.
 - **Dependencies to know:** `@nestjs/bullmq` is pinned to `^11` (12 is ESM-only and this project is CommonJS) and BullMQ needs `ioredis` installed as its Redis client. FFmpeg comes from the `apt` package in `Dockerfile.dev`.
+
+## Video and Channel Management
+
+Implemented in Phase 04 (`docs/phases/phase-04-gerenciamento/`); the decisions are in `docs/decisions/technical-decisions-phase-04-gerenciamento.md`. The management panel and the public channel page are delivered as API only: the UI is not part of the project specification.
+
+- **Publication is separate from processing:** `videos.published_at` (null = editorial draft) and `videos.visibility` (`public` | `unlisted`); only a `ready` video can be published (`CHK_videos_published_ready`). `POST /videos/{public_id}/publication` publishes (`public` by default, writes `published_at = now()` on every call) and `DELETE` unpublishes. A video is **listable** when `published_at IS NOT NULL AND visibility = 'public'`, defined once in `VideosRepository` (`whereListable`).
+- **Reads by publication:** metadata, `stream`, `download` and `thumbnail` are `@OptionalAuth()`: a published video is readable by anyone; a draft only by the owner of its channel. Order: draft asked by anyone else → `404 VIDEO_NOT_FOUND`; then not `ready` → `409 VIDEO_NOT_READY`. Answers carry `Cache-Control: private, no-cache`. The token is read only from the `Authorization` header; a missing, invalid or expired token is anonymous.
+- **Edits (owner only):** `PATCH /videos/{public_id}` (title, description, category by slug, visibility; any processing status; last write wins), `PUT`/`DELETE /videos/{public_id}/thumbnail` (custom cover, validated by content and re-encoded as a 640 px JPEG by FFmpeg in the API; the worker never writes `custom_thumbnail_key`), `PATCH /channels/me` (nickname `^[a-z0-9_]{3,50}$` minus reserved words, name, description).
+- **Listings:** `GET /channels/me/videos` (owner panel, every status) and `GET /channels/{nickname}/videos` (listable only), both `page` + `limit` (20, max 50) with `total` and `total_pages`; `GET /channels/{nickname}` (public page with `video_count`); `GET /categories` (platform list, created by a data migration).
+- **Rate limiting:** four named throttlers in `nestjs-project/src/throttling/`: `default` (10/min per IP, public auth routes and any unclassified route), `public-read` (`THROTTLE_PUBLIC_READ_LIMIT`, 300/min per IP), `authenticated` (120/min per user) and `uploads` (20/min per user). The video reads skip every throttler.
 
 ## Docker Networking
 

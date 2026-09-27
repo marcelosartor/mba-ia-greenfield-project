@@ -1,6 +1,8 @@
 import { Test } from '@nestjs/testing';
+import { Category } from '../categories/entities/category.entity';
 import { getRepositoryToken, TypeOrmModule } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
+import { PostgresQueryRunner } from 'typeorm/driver/postgres/PostgresQueryRunner';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { VerificationToken } from '../auth/entities/verification-token.entity';
 import { Channel } from '../channels/entities/channel.entity';
@@ -12,9 +14,17 @@ import { User } from '../users/entities/user.entity';
 import { Video } from './entities/video.entity';
 import * as publicIdUtil from './public-id.util';
 import { VideoStatus } from './video-status.enum';
-import { VideosRepository } from './videos.repository';
+import { VideoVisibility } from './video-visibility.enum';
+import { VideosRepository, whereListable } from './videos.repository';
 
-const ALL_ENTITIES = [User, Channel, RefreshToken, VerificationToken, Video];
+const ALL_ENTITIES = [
+  User,
+  Channel,
+  RefreshToken,
+  VerificationToken,
+  Video,
+  Category,
+];
 
 describe('VideosRepository (integration)', () => {
   let dataSource: DataSource;
@@ -457,6 +467,264 @@ describe('VideosRepository (integration)', () => {
       const found = await repository.findStuckProcessing(hoursAgo(1), 1);
 
       expect(found.map((video) => video.id)).toEqual([older.id]);
+    });
+  });
+
+  describe('Phase 04 editorial state', () => {
+    const makeReady = (videoId: string) =>
+      videoRepository.update({ id: videoId }, { status: VideoStatus.READY });
+
+    it('publish should write published_at and the visibility only on a ready video', async () => {
+      const draft = await createDraft();
+      const errored = await createDraft('Errored');
+      await makeReady(draft.id);
+      await videoRepository.update(
+        { id: errored.id },
+        { status: VideoStatus.ERROR },
+      );
+
+      expect(await repository.publish(errored.id, VideoVisibility.PUBLIC)).toBe(
+        false,
+      );
+      expect(await repository.publish(draft.id, VideoVisibility.UNLISTED)).toBe(
+        true,
+      );
+
+      const published = await videoRepository.findOneByOrFail({ id: draft.id });
+      expect(published.published_at).toBeInstanceOf(Date);
+      expect(published.visibility).toBe(VideoVisibility.UNLISTED);
+      const untouched = await videoRepository.findOneByOrFail({
+        id: errored.id,
+      });
+      expect(untouched.published_at).toBeNull();
+    });
+
+    it('unpublish should clear published_at and keep the visibility', async () => {
+      const draft = await createDraft();
+      await makeReady(draft.id);
+      await repository.publish(draft.id, VideoVisibility.UNLISTED);
+
+      await repository.unpublish(draft.id);
+
+      const found = await videoRepository.findOneByOrFail({ id: draft.id });
+      expect(found.published_at).toBeNull();
+      expect(found.visibility).toBe(VideoVisibility.UNLISTED);
+    });
+
+    it('updateEditableFields should write only the editable columns', async () => {
+      const draft = await createDraft('Before');
+      const category = await dataSource
+        .getRepository(Category)
+        .findOneByOrFail({ slug: 'musica' });
+
+      await repository.updateEditableFields(draft.id, {
+        title: 'After',
+        description: 'Text',
+        category_id: category.id,
+        visibility: VideoVisibility.UNLISTED,
+        ...({
+          status: VideoStatus.READY,
+          video_key: 'hijacked',
+        } as object),
+      });
+
+      const found = await videoRepository.findOneByOrFail({ id: draft.id });
+      expect(found).toMatchObject({
+        title: 'After',
+        description: 'Text',
+        category_id: category.id,
+        visibility: VideoVisibility.UNLISTED,
+        status: VideoStatus.DRAFT,
+        video_key: draft.video_key,
+      });
+    });
+
+    it('findByPublicIdWithRelations should load the channel and the category', async () => {
+      const draft = await createDraft();
+      const category = await dataSource
+        .getRepository(Category)
+        .findOneByOrFail({ slug: 'jogos' });
+      await videoRepository.update(
+        { id: draft.id },
+        { category_id: category.id },
+      );
+
+      const found = await repository.findByPublicIdWithRelations(
+        draft.public_id,
+      );
+
+      expect(found?.channel.user_id).toBe(channel.user_id);
+      expect(found?.category?.slug).toBe('jogos');
+    });
+
+    it('setCustomThumbnailKey should set and clear the custom cover key', async () => {
+      const draft = await createDraft();
+
+      await repository.setCustomThumbnailKey(
+        draft.id,
+        `${draft.id}/custom.jpg`,
+      );
+      expect(
+        (await videoRepository.findOneByOrFail({ id: draft.id }))
+          .custom_thumbnail_key,
+      ).toBe(`${draft.id}/custom.jpg`);
+
+      await repository.setCustomThumbnailKey(draft.id, null);
+      expect(
+        (await videoRepository.findOneByOrFail({ id: draft.id }))
+          .custom_thumbnail_key,
+      ).toBeNull();
+    });
+
+    it('whereListable should keep only published public videos', async () => {
+      const [publicVideo, unlistedVideo, draftVideo] = await Promise.all([
+        createDraft('Public'),
+        createDraft('Unlisted'),
+        createDraft('Draft'),
+      ]);
+      for (const video of [publicVideo, unlistedVideo, draftVideo]) {
+        await makeReady(video.id);
+      }
+      await repository.publish(publicVideo.id, VideoVisibility.PUBLIC);
+      await repository.publish(unlistedVideo.id, VideoVisibility.UNLISTED);
+
+      const listable = await whereListable(
+        videoRepository
+          .createQueryBuilder('video')
+          .where('video.channel_id = :channelId', { channelId: channel.id }),
+        'video',
+      ).getMany();
+
+      expect(listable.map((video) => video.id)).toEqual([publicVideo.id]);
+    });
+  });
+
+  describe('channel listings (Phase 04)', () => {
+    const seed = async (
+      title: string,
+      overrides: Partial<Video> = {},
+    ): Promise<Video> =>
+      videoRepository.save(
+        videoRepository.create({
+          public_id: title.padEnd(11, 'x').slice(0, 11),
+          channel_id: channel.id,
+          title,
+          video_key: `${channel.id}/${title}/source.mp4`,
+          ...overrides,
+        }),
+      );
+
+    it('findPanelPage should list every status, newest first, breaking ties by id', async () => {
+      const sameInstant = new Date('2026-09-01T10:00:00Z');
+      const statuses = [
+        VideoStatus.DRAFT,
+        VideoStatus.PROCESSING,
+        VideoStatus.READY,
+        VideoStatus.ERROR,
+      ];
+      const saved: Video[] = [];
+      for (const [i, status] of statuses.entries()) {
+        saved.push(await seed(`panel${i}`, { status }));
+      }
+      // Two rows with the same created_at: the id decides.
+      await videoRepository.update(
+        { id: saved[0].id },
+        { created_at: sameInstant },
+      );
+      await videoRepository.update(
+        { id: saved[1].id },
+        { created_at: sameInstant },
+      );
+
+      const [page, total] = await repository.findPanelPage(channel.id, 1, 20);
+
+      expect(total).toBe(4);
+      expect(new Set(page.map((v) => v.status))).toEqual(new Set(statuses));
+      const tied = page.filter(
+        (v) => v.created_at.getTime() === sameInstant.getTime(),
+      );
+      expect(tied.map((v) => v.id)).toEqual(
+        [saved[0].id, saved[1].id].sort().reverse(),
+      );
+    });
+
+    it('findListablePage should keep only published public videos of the channel, by published_at', async () => {
+      const older = await seed('older', {
+        status: VideoStatus.READY,
+        published_at: new Date('2026-09-01T10:00:00Z'),
+      });
+      const newer = await seed('newer', {
+        status: VideoStatus.READY,
+        published_at: new Date('2026-09-02T10:00:00Z'),
+      });
+      await seed('unlisted', {
+        status: VideoStatus.READY,
+        published_at: new Date(),
+        visibility: VideoVisibility.UNLISTED,
+      });
+      await seed('draft', { status: VideoStatus.READY });
+      const otherUser = await dataSource
+        .getRepository(User)
+        .save({ email: 'other_repo@example.com', password: 'hashed' });
+      const otherChannel = await dataSource.getRepository(Channel).save({
+        name: 'Other',
+        nickname: 'otherrepo',
+        user_id: otherUser.id,
+      });
+      await seed('foreign', {
+        channel_id: otherChannel.id,
+        status: VideoStatus.READY,
+        published_at: new Date(),
+      });
+
+      const [page, total] = await repository.findListablePage(
+        channel.id,
+        1,
+        20,
+      );
+
+      expect(page.map((v) => v.id)).toEqual([newer.id, older.id]);
+      expect(total).toBe(2);
+      expect(await repository.countListable(channel.id)).toBe(total);
+    });
+
+    it('findPanelPage should load a page with its category in one SELECT plus one COUNT', async () => {
+      const category = await dataSource
+        .getRepository(Category)
+        .findOneByOrFail({ slug: 'musica' });
+      for (let i = 0; i < 20; i++) {
+        await seed(`cat${String(i).padStart(2, '0')}`, {
+          category_id: category.id,
+        });
+      }
+      const spy = jest.spyOn(PostgresQueryRunner.prototype, 'query');
+
+      const [page] = await repository.findPanelPage(channel.id, 1, 20);
+
+      const selects = spy.mock.calls
+        .map(([sql]) => sql)
+        .filter((sql) => /^\s*SELECT/i.test(sql));
+      expect(page).toHaveLength(20);
+      expect(page.every((v) => v.category?.slug === 'musica')).toBe(true);
+      expect(selects).toHaveLength(2);
+    });
+
+    it('the public listing can be served by the partial index IDX_videos_channel_listable', async () => {
+      const plan = await dataSource.transaction(async (manager) => {
+        // Without seq scans and sorts, the only way to return the rows in the
+        // requested order is an index that already has it: the partial one.
+        await manager.query('SET LOCAL enable_seqscan = off');
+        await manager.query('SET LOCAL enable_sort = off');
+        const rows = await manager.query<{ 'QUERY PLAN': string }[]>(
+          `EXPLAIN SELECT "id" FROM "videos"
+           WHERE "channel_id" = $1 AND "published_at" IS NOT NULL AND "visibility" = 'public'
+           ORDER BY "published_at" DESC, "id" DESC LIMIT 20`,
+          [channel.id],
+        );
+        return rows.map((row) => row['QUERY PLAN']).join('\n');
+      });
+
+      expect(plan).toContain('IDX_videos_channel_listable');
     });
   });
 });

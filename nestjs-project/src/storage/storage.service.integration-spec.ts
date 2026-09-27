@@ -146,6 +146,27 @@ describe('StorageService (integration)', () => {
     });
   });
 
+  describe('deleteObject', () => {
+    it('should remove the object from MinIO and accept a key that does not exist', async () => {
+      const key = newKey(storage.thumbnailsBucket, 'custom.jpg');
+      await storage.putObject(
+        storage.thumbnailsBucket,
+        key,
+        randomBytes(512),
+        'image/jpeg',
+      );
+
+      await storage.deleteObject(storage.thumbnailsBucket, key);
+
+      await expect(
+        storage.headObject(storage.thumbnailsBucket, key),
+      ).rejects.toMatchObject({ name: 'NotFound' });
+      await expect(
+        storage.deleteObject(storage.thumbnailsBucket, key),
+      ).resolves.toBeUndefined();
+    });
+  });
+
   describe('unreachable storage', () => {
     it('should fail with STORAGE_UNAVAILABLE (502) when the endpoint cannot be reached', async () => {
       const unreachable = new StorageService({

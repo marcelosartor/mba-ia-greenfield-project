@@ -1,4 +1,5 @@
 import type { S3Client } from '@aws-sdk/client-s3';
+import { Category } from '../categories/entities/category.entity';
 import { ConfigModule } from '@nestjs/config';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -22,12 +23,20 @@ import { digestStream, randomContent, sha256 } from '../test/stream-test-utils';
 import { User } from '../users/entities/user.entity';
 import { Video } from './entities/video.entity';
 import { VideoStatus } from './video-status.enum';
+import { VideoAccessService } from './video-access.service';
 import { VideoStreamingService } from './video-streaming.service';
 import { VideosRepositoryModule } from './videos-repository.module';
 
 jest.setTimeout(120000);
 
-const ALL_ENTITIES = [User, Channel, RefreshToken, VerificationToken, Video];
+const ALL_ENTITIES = [
+  User,
+  Channel,
+  RefreshToken,
+  VerificationToken,
+  Video,
+  Category,
+];
 const MIB = 1024 * 1024;
 
 describe('VideoStreamingService (integration)', () => {
@@ -51,7 +60,7 @@ describe('VideoStreamingService (integration)', () => {
         VideosRepositoryModule,
         StorageModule,
       ],
-      providers: [VideoStreamingService],
+      providers: [VideoAccessService, VideoStreamingService],
     }).compile();
     dataSource = module.get(DataSource);
     storage = module.get(StorageService);
@@ -86,6 +95,7 @@ describe('VideoStreamingService (integration)', () => {
       channel_id: channel.id,
       title: 'Streamed',
       status: VideoStatus.READY,
+      published_at: new Date(),
       video_key: `test-stream/${publicId}/source.mp4`,
     });
     storedKeys.push(video.video_key);

@@ -4,9 +4,10 @@ import type { StringValue } from 'ms';
 import { JwtModule } from '@nestjs/jwt';
 import { APP_GUARD } from '@nestjs/core';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { ThrottlerGuard } from '@nestjs/throttler';
 import authConfig from '../config/auth.config';
 import { MailModule } from '../mail/mail.module';
+import { ThrottlingModule } from '../throttling/throttling.module';
 import { UsersModule } from '../users/users.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
@@ -26,11 +27,12 @@ import { VerificationToken } from './entities/verification-token.entity';
       }),
     }),
     TypeOrmModule.forFeature([RefreshToken, VerificationToken]),
-    ThrottlerModule.forRoot([{ ttl: 60000, limit: 10 }]),
+    ThrottlingModule,
   ],
   controllers: [AuthController],
   providers: [
     AuthService,
+    // Order matters: the per-user throttlers read req.user set by JwtAuthGuard.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],

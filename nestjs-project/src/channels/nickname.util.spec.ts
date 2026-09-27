@@ -1,4 +1,9 @@
-import { appendRandomSuffix, sanitizeNickname } from './nickname.util';
+import {
+  isReservedNickname,
+  NICKNAME_PATTERN,
+  appendRandomSuffix,
+  sanitizeNickname,
+} from './nickname.util';
 
 describe('sanitizeNickname', () => {
   it('lowercases and strips invalid chars', () => {
@@ -64,5 +69,54 @@ describe('appendRandomSuffix', () => {
       const result = appendRandomSuffix('base');
       expect(result).toMatch(/^base_[a-z0-9]{3}$/);
     }
+  });
+});
+
+describe('nickname rules (Phase 04)', () => {
+  it.each(['admin', 'me', 'ab'])(
+    'gives the random suffix to the generated prefix %s',
+    (prefix) => {
+      const nickname = sanitizeNickname(prefix);
+
+      expect(nickname).toMatch(new RegExp(`^${prefix}_[a-z0-9]{3}$`));
+      expect(NICKNAME_PATTERN.test(nickname)).toBe(true);
+      expect(isReservedNickname(nickname)).toBe(false);
+    },
+  );
+
+  it('keeps a valid, non-reserved prefix unchanged', () => {
+    expect(sanitizeNickname('joao_silva')).toBe('joao_silva');
+  });
+
+  it('keeps the user_ fallback for an empty prefix', () => {
+    expect(sanitizeNickname('***')).toMatch(/^user_[a-z0-9]{8}$/);
+  });
+
+  it.each([
+    'me',
+    'admin',
+    'api',
+    'channels',
+    'videos',
+    'categories',
+    'auth',
+    'docs',
+    'support',
+  ])('reserves %s', (word) => {
+    expect(isReservedNickname(word)).toBe(true);
+  });
+
+  it('does not reserve ordinary names', () => {
+    expect(isReservedNickname('maria')).toBe(false);
+  });
+
+  it.each([
+    ['ab', false],
+    ['abc', true],
+    ['a'.repeat(50), true],
+    ['a'.repeat(51), false],
+    ['Com-Hifen', false],
+  ])('NICKNAME_PATTERN on %s is %s', (nickname, valid) => {
+    expect(NICKNAME_PATTERN.test(nickname)).toBe(valid);
   });
 });

@@ -95,6 +95,20 @@ Protected handlers (those without `@Public()`) must include `@ApiBearerAuth('acc
 me(@CurrentUser() user: JwtPayload): JwtPayload { ... }
 ```
 
+### Optional authentication endpoints
+
+A route marked `@OptionalAuth()` (`src/auth/decorators/optional-auth.decorator.ts`) is readable without a token, but a valid `Authorization: Bearer` token identifies the caller — the response may change for the owner (e.g. a draft video is served only to its owner). It is the one exception to the rule above: decorate it with `ApiOptionalBearerAuth()` (`src/common/openapi/api-optional-bearer-auth.decorator.ts`), which declares the operation security as `[{}, { "access-token": [] }]` (no token, or the bearer). Never combine `@OptionalAuth()` with `@Public()`, and never use `@ApiBearerAuth` alone on it. Read the caller with `@OptionalCurrentUser()`, which is `undefined` for anonymous requests.
+
+```typescript
+@Get(':public_id')
+@OptionalAuth()
+@ApiOptionalBearerAuth()
+getVideo(
+  @Param('public_id') publicId: string,
+  @OptionalCurrentUser() viewer: JwtPayload | undefined,
+) { ... }
+```
+
 ### Canonical example
 
 `nestjs-project/src/auth/auth.controller.ts` is the reference implementation of the convention above — when in doubt about how to combine these decorators, mirror it.

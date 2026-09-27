@@ -79,6 +79,11 @@ describe('VideoProcessor (integration)', () => {
         storage.thumbnailsBucket,
         `${video.id}/default.jpg`,
       );
+      await deleteStoredObject(
+        cleanupClient,
+        storage.thumbnailsBucket,
+        `${video.id}/custom.jpg`,
+      );
     }
   });
 
@@ -145,6 +150,35 @@ describe('VideoProcessor (integration)', () => {
     );
     expect(thumbnail.contentType).toBe('image/jpeg');
     expect(thumbnail.contentLength).toBeGreaterThan(0);
+  });
+
+  it('should never touch the custom cover set by the owner (Phase 04)', async () => {
+    const draft = await createUploadedVideo(
+      await generateMp4({ durationSeconds: 2 }),
+    );
+    const customKey = `${draft.id}/custom.jpg`;
+    const customCover = Buffer.from('owner cover bytes');
+    await storage.putObject(
+      storage.thumbnailsBucket,
+      customKey,
+      customCover,
+      'image/jpeg',
+    );
+    await videos.setCustomThumbnailKey(draft.id, customKey);
+
+    await publisher.publish(draft.id);
+    await waitForStatus(draft.id, VideoStatus.READY);
+
+    const video = await dataSource
+      .getRepository(Video)
+      .findOneByOrFail({ id: draft.id });
+    expect(video.custom_thumbnail_key).toBe(customKey);
+    expect(video.thumbnail_key).toBe(`${draft.id}/default.jpg`);
+    const custom = await storage.headObject(
+      storage.thumbnailsBucket,
+      customKey,
+    );
+    expect(custom.contentLength).toBe(customCover.length);
   });
 
   it('should keep the video in processing while the job runs', async () => {

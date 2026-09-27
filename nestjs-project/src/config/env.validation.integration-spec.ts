@@ -119,3 +119,26 @@ describe('envValidationSchema — queue and video', () => {
     ).toBeUndefined();
   });
 });
+
+describe('envValidationSchema — rate limiting and custom thumbnail', () => {
+  it('should default the public read limit and the thumbnail limits', () => {
+    const result = validate({});
+    const value = result.value as Record<string, unknown>;
+    expect(result.error).toBeUndefined();
+    expect(value.THROTTLE_PUBLIC_READ_LIMIT).toBe(300);
+    expect(value.VIDEO_THUMBNAIL_MAX_PIXELS).toBe(16777216);
+    expect(value.VIDEO_THUMBNAIL_TIMEOUT_MS).toBe(5000);
+  });
+
+  it.each([
+    'THROTTLE_PUBLIC_READ_LIMIT',
+    'VIDEO_THUMBNAIL_MAX_PIXELS',
+    'VIDEO_THUMBNAIL_TIMEOUT_MS',
+  ])('should reject %s equal to zero or not an integer', (key) => {
+    for (const invalid of ['0', '1.5', 'abc']) {
+      const { error } = validate({ [key]: invalid });
+      expect(error).toBeDefined();
+      expect(error!.message).toContain(key);
+    }
+  });
+});

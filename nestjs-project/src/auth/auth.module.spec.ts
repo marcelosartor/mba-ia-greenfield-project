@@ -1,9 +1,11 @@
 import { Test } from '@nestjs/testing';
+import { Category } from '../categories/entities/category.entity';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import appConfig from '../config/app.config';
 import authConfig from '../config/auth.config';
 import mailConfig from '../config/mail.config';
+import throttleConfig from '../config/throttle.config';
 import { Channel } from '../channels/entities/channel.entity';
 import { User } from '../users/entities/user.entity';
 import { createTestDataSource } from '../test/create-test-data-source';
@@ -12,7 +14,14 @@ import { RefreshToken } from './entities/refresh-token.entity';
 import { VerificationToken } from './entities/verification-token.entity';
 import { Video } from '../videos/entities/video.entity';
 
-const ALL_ENTITIES = [User, Channel, RefreshToken, VerificationToken, Video];
+const ALL_ENTITIES = [
+  User,
+  Channel,
+  RefreshToken,
+  VerificationToken,
+  Video,
+  Category,
+];
 
 describe('AuthModule', () => {
   it('should compile successfully with JwtModule, TypeOrmModule, UsersModule, and MailModule', async () => {
@@ -20,7 +29,7 @@ describe('AuthModule', () => {
       imports: [
         ConfigModule.forRoot({
           isGlobal: true,
-          load: [appConfig, authConfig, mailConfig],
+          load: [appConfig, authConfig, mailConfig, throttleConfig],
         }),
         TypeOrmModule.forRoot(createTestDataSource(ALL_ENTITIES).options),
         AuthModule,
